@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shift Headcount and Roster Compliance</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="login-overlay" id="login-overlay">
+      <section class="login-card">
+        <p class="eyebrow">Secure Access</p>
+        <h2>Sign In</h2>
+        <p class="stacked-copy">
+          Admin users can maintain baseline manning, aliases, and assumptions.
+          Standard users can paste rosters and review compliance.
+        </p>
+        <form id="login-form" class="form-grid">
+          <label>
+            Username
+            <input name="username" autocomplete="username" required />
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button class="primary-button full-span" type="submit">Sign In</button>
+        </form>
+        <div id="login-message" class="stacked-copy"></div>
+        <div class="login-hint">
+          <p><strong>Demo admin:</strong> <code>admin</code> / <code>Admin@123</code></p>
+          <p><strong>Demo user:</strong> <code>user</code> / <code>User@123</code></p>
+        </div>
+      </section>
+    </div>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div>
+          <p class="eyebrow">Operations Control</p>
+          <h1>Shift Headcount</h1>
+          <p class="sidebar-copy">
+            Baseline manning, Paste RS intake, alias management, and compliance
+            reporting in one place.
+          </p>
+        </div>
+
+        <nav class="nav">
+          <button class="nav-link active" data-view="dashboard">Dashboard</button>
+          <button class="nav-link" data-view="baseline">Baseline Setup</button>
+          <button class="nav-link" data-view="mapping">Department Mapping</button>
+          <button class="nav-link" data-view="roster">Paste RS</button>
+          <button class="nav-link" data-view="compliance">Compliance</button>
+        </nav>
+
+        <section class="panel sidebar-panel">
+          <h2>Working Rules</h2>
+          <div id="session-summary" class="stacked-copy"></div>
+          <p>
+            Non-working codes are excluded from actual staffing: <code>blank</code>,
+            <code>V</code>, <code>UP</code>, <code>WO</code>, <code>AL</code>,
+            <code>UPL</code>, <code>PC</code>.
+          </p>
+          <button class="ghost-button" id="logout-btn" type="button">Sign Out</button>
+        </section>
+      </aside>
+
+      <main class="main-content">
+        <header class="hero">
+          <div>
+            <p class="eyebrow">Daily Compliance</p>
+            <h2 id="view-title">Dashboard</h2>
+            <p id="view-subtitle" class="hero-copy">
+              Monitor baseline need, roster actuals, and department naming mismatches.
+            </p>
+          </div>
+          <div class="hero-stats" id="hero-stats"></div>
+        </header>
+
+        <section class="view active" id="dashboard-view">
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Dashboard Overview</h3>
+              <span class="caption">Operational snapshot for baseline staffing, roster intake, and compliance variance</span>
+            </div>
+            <div class="stacked-copy">
+              <p>This dashboard shows the current staffing baseline, the latest Paste RS upload, and where departments are short or over baseline.</p>
+            </div>
+          </article>
+
+          <div class="grid two-up">
+            <article class="panel">
+              <div class="panel-header">
+                <h3>Key Summary</h3>
+                <button class="ghost-button" id="seed-data-btn">Reset Demo Data</button>
+              </div>
+              <div id="summary-cards" class="summary-cards"></div>
+            </article>
+
+            <article class="panel">
+              <h3>Recent Upload</h3>
+              <div id="recent-upload" class="stacked-copy"></div>
+            </article>
+          </div>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Upload History</h3>
+              <button class="ghost-button" id="export-state-btn">Export Data</button>
+            </div>
+            <div id="upload-history" class="stacked-copy"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Shortage Watch</h3>
+              <span class="caption">Weekly variance by sub-department</span>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Main Department</th>
+                    <th>Sub-Department</th>
+                    <th>Baseline</th>
+                    <th>Actual</th>
+                    <th>Variance</th>
+                  </tr>
+                </thead>
+                <tbody id="shortage-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="baseline-view">
+          <div class="grid two-up">
+            <article class="panel">
+              <h3>Add or Edit Baseline Shift</h3>
+              <form id="baseline-form" class="form-grid">
+                <label>
+                  Main Department
+                  <input name="mainDepartment" required />
+                </label>
+                <label>
+                  Sub-Department
+                  <input name="subDepartment" required />
+                </label>
+                <label>
+                  Shift
+                  <input name="shiftName" required />
+                </label>
+                <label>
+                  Position
+                  <input name="positionName" required />
+                </label>
+                <label><span>Sun</span><input name="sun" type="number" min="0" value="0" required /></label>
+                <label><span>Mon</span><input name="mon" type="number" min="0" value="0" required /></label>
+                <label><span>Tue</span><input name="tue" type="number" min="0" value="0" required /></label>
+                <label><span>Wed</span><input name="wed" type="number" min="0" value="0" required /></label>
+                <label><span>Thu</span><input name="thu" type="number" min="0" value="0" required /></label>
+                <label><span>Fri</span><input name="fri" type="number" min="0" value="0" required /></label>
+                <label><span>Sat</span><input name="sat" type="number" min="0" value="0" required /></label>
+                <button class="primary-button" type="submit">Save Baseline Row</button>
+              </form>
+            </article>
+
+            <article class="panel">
+              <h3>Formula Assumptions</h3>
+              <form id="settings-form" class="form-grid compact">
+                <label>
+                  Weeks in Year
+                  <input name="weeksInYear" type="number" min="1" value="48" required />
+                </label>
+                <label>
+                  Annual Days
+                  <input name="annualDays" type="number" min="1" value="365" required />
+                </label>
+                <label>
+                  Days Off
+                  <input name="daysOff" type="number" min="0" value="48" required />
+                </label>
+                <label>
+                  Public Holidays
+                  <input name="publicHolidays" type="number" min="0" value="11" required />
+                </label>
+                <button class="primary-button" type="submit">Update Assumptions</button>
+              </form>
+              <div id="fte-preview" class="stacked-copy"></div>
+            </article>
+          </div>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Baseline Shift Rows</h3>
+              <div class="actions-cell">
+                <label>
+                  <span class="caption">Department Filter</span>
+                  <select id="baseline-department-filter"></select>
+                </label>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Main Department</th>
+                    <th>Sub-Department</th>
+                    <th>Shift</th>
+                    <th>Position</th>
+                    <th>Sun</th>
+                    <th>Mon</th>
+                    <th>Tue</th>
+                    <th>Wed</th>
+                    <th>Thu</th>
+                    <th>Fri</th>
+                    <th>Sat</th>
+                    <th>Weekly Total</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="baseline-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="mapping-view">
+          <div class="grid two-up">
+            <article class="panel">
+              <h3>Alias Mapping</h3>
+              <form id="mapping-form" class="form-grid compact">
+                <label>
+                  Paste RS Name
+                  <input name="sourceName" required />
+                </label>
+                <label>
+                  Baseline Sub-Department
+                  <input name="targetName" required />
+                </label>
+                <button class="primary-button" type="submit">Save Mapping</button>
+              </form>
+              <div id="mapping-status" class="stacked-copy"></div>
+            </article>
+
+            <article class="panel">
+              <h3>Mismatch Review</h3>
+              <div id="mismatch-review" class="stacked-copy"></div>
+            </article>
+          </div>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Mapped Names</h3>
+              <span class="caption">Admin can align Paste RS labels with baseline structure</span>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Paste RS Name</th>
+                    <th>Baseline Name</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="mapping-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="roster-view">
+          <div class="grid two-up">
+            <article class="panel">
+              <h3>Paste RS Intake</h3>
+              <form id="roster-form" class="form-grid">
+                <label>
+                  Upload Label
+                  <input name="uploadLabel" value="Week 1 Demo" required />
+                </label>
+                <label class="full-span">
+                  Paste tab-separated rows with columns:
+                  <code>ID Name Department Sun Mon Tue Wed Thu Fri Sat</code>
+                  <textarea
+                    name="rosterText"
+                    rows="12"
+                    placeholder="100011[TAB]Chathura[TAB]Engineering[TAB]09A[TAB]09A..."
+                    required
+                  ></textarea>
+                </label>
+                <button class="primary-button" type="submit">Process Paste RS</button>
+              </form>
+            </article>
+
+            <article class="panel">
+              <h3>Upload Validation</h3>
+              <div id="upload-validation" class="stacked-copy"></div>
+            </article>
+          </div>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Roster Rows</h3>
+              <div class="actions-cell">
+                <label>
+                  <span class="caption">Search Rows</span>
+                  <input id="roster-search" type="text" placeholder="Search by row, name, ID, or department" />
+                </label>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Row</th>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Paste RS Department</th>
+                    <th>Mapped Baseline</th>
+                    <th>Sun</th>
+                    <th>Mon</th>
+                    <th>Tue</th>
+                    <th>Wed</th>
+                    <th>Thu</th>
+                    <th>Fri</th>
+                    <th>Sat</th>
+                  </tr>
+                </thead>
+                <tbody id="roster-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="compliance-view">
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Compliance Result</h3>
+              <div class="actions-cell">
+                <label>
+                  <span class="caption">Department Filter</span>
+                  <select id="compliance-department-filter"></select>
+                </label>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Main Department</th>
+                    <th>Sub-Department</th>
+                    <th>Metric</th>
+                    <th>Sun</th>
+                    <th>Mon</th>
+                    <th>Tue</th>
+                    <th>Wed</th>
+                    <th>Thu</th>
+                    <th>Fri</th>
+                    <th>Sat</th>
+                    <th>Weekly Total</th>
+                  </tr>
+                </thead>
+                <tbody id="compliance-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

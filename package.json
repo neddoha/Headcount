@@ -1,0 +1,9 @@
+{
+  "name": "shift-headcount-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python backend/server.py"
+  }
+}

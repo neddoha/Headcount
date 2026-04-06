@@ -1,0 +1,7 @@
+backend/app_state.json
+backend/session.json
+backend/sessions.json
+backend/*.db
+backend/*.db-journal
+__pycache__/
+*.pyc
