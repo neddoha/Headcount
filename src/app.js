@@ -19,6 +19,7 @@ const elements = {
   loginOverlay: document.querySelector("#login-overlay"),
   loginForm: document.querySelector("#login-form"),
   loginMessage: document.querySelector("#login-message"),
+  loginHint: document.querySelector("#login-hint"),
   sessionSummary: document.querySelector("#session-summary"),
   logoutBtn: document.querySelector("#logout-btn"),
   navLinks: document.querySelectorAll(".nav-link"),
@@ -45,12 +46,18 @@ const elements = {
   rosterSearch: document.querySelector("#roster-search"),
   rosterTable: document.querySelector("#roster-table"),
   uploadValidation: document.querySelector("#upload-validation"),
+  blankRosterCheck: document.querySelector("#blank-roster-check"),
   complianceDepartmentFilter: document.querySelector("#compliance-department-filter"),
   complianceTable: document.querySelector("#compliance-table"),
 };
 
 const FORCED_MAPPING_OVERRIDES = {
   "f&b - nickel lounge": "F&B - Millies",
+};
+
+const authState = {
+  environment: "development",
+  usesDefaultCredentials: true,
 };
 
 let currentUser = await initializeSession();
@@ -76,6 +83,8 @@ async function initializeSession() {
     const response = await fetch("/api/auth/session", { headers: { Accept: "application/json" } });
     if (!response.ok) return null;
     const payload = await response.json();
+    authState.environment = payload?.auth?.environment || "development";
+    authState.usesDefaultCredentials = payload?.auth?.usesDefaultCredentials ?? true;
     return payload?.user || null;
   } catch {
     return null;
@@ -165,7 +174,7 @@ function reconcileLoadedState(loadedState) {
 }
 
 function mergeBaselineRows(existingRows) {
-  const rows = Array.isArray(existingRows)
+  let rows = Array.isArray(existingRows)
     ? existingRows.filter((row) => row.shiftName !== "Imported Baseline")
     : [];
   const knownKeys = new Set(
@@ -178,7 +187,17 @@ function mergeBaselineRows(existingRows) {
     const key = `${normalizeName(row.mainDepartment)}|||${normalizeName(row.subDepartment)}|||${normalizeName(row.shiftName)}|||${normalizeName(row.positionName)}|||${row.rowType || "shift"}`;
     if (!knownKeys.has(key)) {
       rows.push(structuredClone(row));
+      return;
     }
+    if ((row.rowType || "shift") !== "summary" || !row.budgetHeadcount) return;
+    rows = rows.map((existingRow) => {
+      const existingKey = `${normalizeName(existingRow.mainDepartment)}|||${normalizeName(existingRow.subDepartment)}|||${normalizeName(existingRow.shiftName)}|||${normalizeName(existingRow.positionName)}|||${existingRow.rowType || "shift"}`;
+      if (existingKey !== key || existingRow.budgetHeadcount) return existingRow;
+      return {
+        ...existingRow,
+        budgetHeadcount: row.budgetHeadcount,
+      };
+    });
   });
   return rows;
 }
@@ -235,22 +254,22 @@ function bindEvents() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     elements.loginMessage.textContent = "Signing in...";
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: form.get("username"),
-          password: form.get("password"),
-        }),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        elements.loginMessage.textContent = payload?.error || "Sign in failed.";
-        return;
-      }
-      currentUser = payload.user;
-      const remoteState = await loadStateFromApi();
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: form.get("username"),
+            password: form.get("password"),
+          }),
+        });
+        const payload = await readJsonResponse(response);
+        if (!response.ok) {
+          elements.loginMessage.textContent = payload?.error || payload?.rawText || "Sign in failed.";
+          return;
+        }
+        currentUser = payload.user;
+        const remoteState = await loadStateFromApi();
       if (remoteState) {
         applyLoadedState(remoteState);
       }
@@ -479,6 +498,7 @@ function render() {
   const baselineSummary = aggregateBaseline(state.baselineRows);
   const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows);
   renderSessionState();
+  renderLoginHint();
   renderDepartmentFilters();
   renderHeroStats(baselineSummary, complianceSummary);
   renderSummaryCards(complianceSummary);
@@ -491,7 +511,24 @@ function render() {
   renderMismatchReview();
   renderRosterTable();
   renderUploadValidation();
+  renderBlankRosterCheck();
   renderComplianceTable(complianceSummary);
+}
+
+function renderLoginHint() {
+  if (!elements.loginHint) return;
+  if (authState.environment === "production" && !authState.usesDefaultCredentials) {
+    elements.loginHint.innerHTML = `
+      <p><strong>Live deployment:</strong> use the admin and user passwords configured in Render.</p>
+      <p>The demo passwords shown during local development do not apply to this live site.</p>
+    `;
+    return;
+  }
+
+  elements.loginHint.innerHTML = `
+    <p><strong>Demo admin:</strong> <code>admin</code> / <code>Admin@123</code></p>
+    <p><strong>Demo user:</strong> <code>user</code> / <code>User@123</code></p>
+  `;
 }
 
 function renderDepartmentFilters() {
@@ -542,13 +579,21 @@ function renderHeroStats(baselineSummary, complianceSummary) {
   const shortages = complianceSummary.filter((entry) => entry.weeklyVariance < 0).length;
   const mismatches = unmatchedRosterDepartments(state.rosterUpload.rows, state.baselineRows).length;
   const tiles = [
-    ["Sub-Departments", String(baselineSummary.length)],
-    ["Active Shortages", String(shortages)],
-    ["Name Mismatches", String(mismatches)],
+    ["Total Work Areas", "Baseline areas currently tracked", String(baselineSummary.length)],
+    ["Departments Short", "Areas below required staffing", String(shortages)],
+    ["Mapping Issues", "Paste RS names needing correction", String(mismatches)],
   ];
 
   elements.heroStats.innerHTML = tiles
-    .map(([label, value]) => `<div class="mini-stat"><span>${label}</span><strong>${value}</strong></div>`)
+    .map(
+      ([label, helper, value]) => `
+        <div class="mini-stat">
+          <span>${label}</span>
+          <small>${helper}</small>
+          <strong>${value}</strong>
+        </div>
+      `,
+    )
     .join("");
 }
 
@@ -778,11 +823,47 @@ function renderUploadValidation() {
     : "<p>No upload issues found. Paste RS rows are ready for compliance calculation.</p>";
 }
 
+function renderBlankRosterCheck() {
+  const blanks = collectBlankRosterEntries(state.rosterUpload.rows);
+  if (!blanks.length) {
+    elements.blankRosterCheck.innerHTML = "<p>No blank roster cells found. All roster days are updated.</p>";
+    return;
+  }
+
+  elements.blankRosterCheck.innerHTML = `
+    <p><strong>${blanks.length}</strong> blank roster entries found.</p>
+    <div class="history-list">${blanks
+      .map(
+        (entry) => `
+          <div class="history-item">
+            <div>
+              <p><strong>Row ${entry.rowNumber}</strong> | ${escapeHtml(entry.employeeName || "Unknown Employee")}</p>
+              <p>ID: ${escapeHtml(entry.employeeId || "Missing ID")} | Department: ${escapeHtml(entry.rosterDepartment || "Missing Department")}</p>
+              <p>Blank day: ${entry.dayLabel}</p>
+            </div>
+          </div>
+        `,
+      )
+      .join("")}</div>
+  `;
+}
+
 function renderComplianceTable(complianceSummary) {
   const rows = [];
   complianceSummary
     .filter((entry) => viewState.complianceDepartment === "all" || entry.mainDepartment === viewState.complianceDepartment)
     .forEach((entry) => {
+      rows.push(`
+        <tr class="compliance-group-row">
+          <td colspan="11">
+            <div class="compliance-group-heading">
+              <span class="compliance-group-department">${escapeHtml(entry.mainDepartment)}</span>
+              <span class="compliance-group-divider">/</span>
+              <span class="compliance-group-subdepartment">${escapeHtml(entry.subDepartment)}</span>
+            </div>
+          </td>
+        </tr>
+      `);
       rows.push(buildMetricRow(entry, "Baseline Need", entry.baselineByDay, entry.weeklyBaseline));
       rows.push(buildMetricRow(entry, "Roster Actual", entry.actualByDay, entry.weeklyActual));
       rows.push(buildMetricRow(entry, "Variance", entry.varianceByDay, entry.weeklyVariance));
@@ -800,27 +881,63 @@ function renderComplianceTable(complianceSummary) {
 }
 
 function buildMetricRow(entry, label, byDay, weeklyTotal, requiredFte = "") {
-  const rowClass = label === "Variance" ? "variance-row" : label === "Total (Shifts)" ? "summary-row" : "";
+  const rowClass = [
+    "compliance-metric-row",
+    label === "Variance" ? "variance-row" : "",
+    label === "Total (Shifts)" ? "summary-row" : "",
+    label === "Baseline Need" ? "baseline-row" : "",
+    label === "Roster Actual" ? "actual-row" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   const isShiftSummary = label === "Total (Shifts)";
   const formattedFte = formatFte(requiredFte);
-  const weeklyDisplay = isShiftSummary && requiredFte
-    ? `${weeklyTotal} | ${formattedFte} FTE`
+  const formattedBudget = formatBudget(entry.budgetHeadcount);
+  const weeklyDisplay = isShiftSummary
+    ? buildShiftSummaryDisplay(formattedBudget, formattedFte)
     : weeklyTotal;
   return `
     <tr class="${rowClass}">
-      <td>${escapeHtml(entry.mainDepartment)}</td>
-      <td>${escapeHtml(entry.subDepartment)}</td>
-      <td>${label}</td>
-      ${DAYS.map((day) => `<td class="${label === "Variance" ? varianceCellClass(byDay[day]) : ""}">${isShiftSummary ? "" : byDay[day]}</td>`).join("")}
-      <td class="${label === "Variance" ? varianceCellClass(weeklyTotal) : ""}">${weeklyDisplay}</td>
+      <td class="compliance-dimension-cell">${escapeHtml(entry.mainDepartment)}</td>
+      <td class="compliance-dimension-cell">${escapeHtml(entry.subDepartment)}</td>
+      <td class="metric-cell"><span class="metric-pill metric-pill-${metricPillClass(label)}">${label}</span></td>
+      ${DAYS.map((day) => {
+        const value = isShiftSummary ? "" : byDay[day];
+        const cellClasses = ["day-value-cell"];
+        if (label === "Variance") cellClasses.push(varianceCellClass(byDay[day]));
+        return `<td class="${cellClasses.join(" ")}">${value}</td>`;
+      }).join("")}
+      <td class="weekly-total-cell ${label === "Variance" ? varianceCellClass(weeklyTotal) : ""}">${weeklyDisplay}</td>
     </tr>
   `;
 }
 
+function metricPillClass(label) {
+  if (label === "Baseline Need") return "baseline";
+  if (label === "Roster Actual") return "actual";
+  if (label === "Variance") return "variance";
+  return "summary";
+}
+
 function formatFte(value) {
   const numeric = Number(value || 0);
-  if (!Number.isFinite(numeric)) return "0.0";
-  return numeric.toFixed(1);
+  if (!Number.isFinite(numeric)) return "0";
+  return String(Math.round(numeric));
+}
+
+function formatBudget(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || value === "") return "";
+  return String(Math.round(numeric));
+}
+
+function buildShiftSummaryDisplay(formattedBudget, formattedFte) {
+  const parts = [];
+  if (formattedBudget) {
+    parts.push(`Budget ${formattedBudget}`);
+  }
+  parts.push(`${formattedFte} FTE`);
+  return parts.join(" | ");
 }
 
 function varianceCellClass(value) {
@@ -851,6 +968,7 @@ function aggregateBaseline(rows) {
     const key = `${row.mainDepartment}|||${row.subDepartment}`;
     summaries.set(key, {
       requiredFte: row.requiredFte || "",
+      budgetHeadcount: row.budgetHeadcount || "",
       summaryByDay: {
         sun: Number(row.sun || 0),
         mon: Number(row.mon || 0),
@@ -892,6 +1010,7 @@ function buildComplianceRows(baselineSummary, rosterRows) {
       baselineByDay: baselineEntry.baselineByDay,
       summaryByDay: baselineEntry.baselineByDay,
       requiredFte: baselineEntry.summary?.requiredFte || "",
+      budgetHeadcount: baselineEntry.summary?.budgetHeadcount || "",
       actualByDay,
       varianceByDay,
       weeklyBaseline: sumDayMap(baselineEntry.baselineByDay),
@@ -980,6 +1099,19 @@ function collectRosterIssues(rows, baselineRows) {
   return issues;
 }
 
+function collectBlankRosterEntries(rows) {
+  return rows.flatMap((row) =>
+    DAYS.filter((day) => !String(row[day] || "").trim()).map((day) => ({
+      rowNumber: row.sourceRowNumber || "",
+      employeeId: row.employeeId,
+      employeeName: row.employeeName,
+      rosterDepartment: row.rosterDepartment,
+      day,
+      dayLabel: day.toUpperCase(),
+    })),
+  );
+}
+
 function buildMismatchSuggestions(rows, baselineRows, mappings) {
   const alreadyMapped = new Set(mappings.map((item) => normalizeName(item.sourceName)));
   const validSubDepartments = [...new Set(baselineRows.map((row) => row.subDepartment))];
@@ -1064,6 +1196,16 @@ function exportState() {
   link.download = "shift-headcount-export.json";
   link.click();
   URL.revokeObjectURL(url);
+}
+
+async function readJsonResponse(response) {
+  const rawText = await response.text();
+  if (!rawText) return {};
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    return { rawText };
+  }
 }
 
 function isAdmin() {

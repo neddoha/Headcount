@@ -86,6 +86,13 @@ def build_session(username: str, account: dict) -> dict:
     }
 
 
+def uses_default_credentials() -> bool:
+    return (
+        USERS["admin"]["password"] == "Admin@123"
+        and USERS["user"]["password"] == "User@123"
+    )
+
+
 class AppHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         self.response_cookies: list[str] = []
@@ -102,7 +109,15 @@ class AppHandler(SimpleHTTPRequestHandler):
             )
             return
         if self.path == "/api/auth/session":
-            self.send_json({"user": sanitized_session(self.get_current_session())})
+            self.send_json(
+                {
+                    "user": sanitized_session(self.get_current_session()),
+                    "auth": {
+                        "environment": APP_ENV,
+                        "usesDefaultCredentials": uses_default_credentials(),
+                    },
+                }
+            )
             return
         if self.path == "/api/state":
             session = self.get_current_session()

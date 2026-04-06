@@ -4,9 +4,59 @@ export const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 export const DEFAULT_NON_WORKING_CODES = ["", "V", "UP", "WO", "AL", "UPL", "PC"];
 
+const AUTO_COMPLIANCE_BUDGETS = {
+  "F&B - Electric": "8",
+  "F&B - Ceecconi's": "14",
+  "F&B - Kaia": "9",
+  "F&B - Millies": "43",
+  "F&B - Malibu": "13",
+  "F&B - Hadika": "7",
+  "Cake Shop": "3",
+  "F&B - Banquet": "9",
+  "F&B - IRD": "6",
+  "F&B - Ned Club": "25",
+  "F&B - Admin": "",
+  "CUL - Neds Club": "10",
+  "CUL - Pastry": "16",
+  "CUL - Millies": "10",
+  "CUL - Ceconi's": "11",
+  "CUL - Electric": "4",
+  "CUL - Kaia": "5",
+  "CUL - Malibu": "10",
+  "CUL - Hadika": "4",
+  "CUL - Banquet": "19",
+  "CUL - QIA": "",
+  "BOH Stewarding": "16",
+  "CUL - Butchery": "4",
+  "Front Office": "",
+  "Ned SPA": "",
+  "Housekeeping": "",
+  "Security": "",
+  "Hygiene": "",
+  "Engineering": "",
+  "Membership / Club": "",
+  "Finance": "",
+  "HR": "",
+  "Cafeteria": "",
+  "Sales & Marketing": "",
+};
+
+const BUDGET_ALIASES = {
+  "F&B - Cecconis": "F&B - Ceecconi's",
+  "CUL - Cecconis": "CUL - Ceconi's",
+  "BOH - Stewarding": "BOH Stewarding",
+  "CUL - Cafeteria": "Cafeteria",
+};
+
 export const DEMO_BASELINE_ROWS = EXTRACTED_BASELINE_ROWS.map((row) => ({
   id: crypto.randomUUID(),
   ...row,
+  budgetHeadcount:
+    (row.rowType || "shift") === "summary"
+      ? AUTO_COMPLIANCE_BUDGETS[row.subDepartment] ??
+        AUTO_COMPLIANCE_BUDGETS[BUDGET_ALIASES[row.subDepartment]] ??
+        ""
+      : "",
 }));
 
 export const DEMO_MAPPINGS = [
