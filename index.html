@@ -51,6 +51,7 @@
           <button class="nav-link" data-view="mapping">Department Mapping</button>
           <button class="nav-link" data-view="roster">Paste RS</button>
           <button class="nav-link" data-view="compliance">Compliance</button>
+          <button class="nav-link" data-view="blank-check">Blank Roster Check</button>
         </nav>
 
         <section class="panel sidebar-panel">
@@ -190,6 +191,34 @@
             </article>
           </div>
 
+          <div class="grid two-up">
+            <article class="panel">
+              <h3>Department Manager</h3>
+              <form id="department-form" class="form-grid compact">
+                <label>
+                  Existing Department
+                  <select name="currentDepartment">
+                    <option value="">Add new department only</option>
+                  </select>
+                </label>
+                <label>
+                  Department Name
+                  <input name="departmentName" required />
+                </label>
+                <button class="primary-button" type="submit">Save Department</button>
+              </form>
+              <div id="department-status" class="stacked-copy"></div>
+            </article>
+
+            <article class="panel">
+              <h3>Department Notes</h3>
+              <div class="stacked-copy">
+                <p>Use this section to rename an existing main department everywhere in the app.</p>
+                <p>To add a completely new department with its own sub-departments and shifts, add a new row in <strong>Baseline Shift</strong> using the new main department name.</p>
+              </div>
+            </article>
+          </div>
+
           <article class="panel">
             <div class="panel-header">
               <h3>Baseline Shift Rows</h3>
@@ -300,14 +329,6 @@
 
           <article class="panel">
             <div class="panel-header">
-              <h3>Blank Roster Check</h3>
-              <span class="caption">Rows and days where the roster was left blank</span>
-            </div>
-            <div id="blank-roster-check" class="stacked-copy"></div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-header">
               <h3>Roster Rows</h3>
               <div class="actions-cell">
                 <label>
@@ -371,6 +392,19 @@
                 <tbody id="compliance-table"></tbody>
               </table>
             </div>
+          </article>
+        </section>
+
+        <section class="view" id="blank-check-view">
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Blank Roster Check</h3>
+              <span class="caption">Rows and days where the roster was left blank in Paste RS</span>
+            </div>
+            <div class="stacked-copy">
+              <p>This view highlights roster rows that were not updated for one or more days, so users can correct them before reviewing compliance.</p>
+            </div>
+            <div id="blank-roster-check" class="stacked-copy"></div>
           </article>
         </section>
       </main>

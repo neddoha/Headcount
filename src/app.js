@@ -36,6 +36,8 @@ const elements = {
   baselineForm: document.querySelector("#baseline-form"),
   baselineDepartmentFilter: document.querySelector("#baseline-department-filter"),
   baselineTable: document.querySelector("#baseline-table"),
+  departmentForm: document.querySelector("#department-form"),
+  departmentStatus: document.querySelector("#department-status"),
   settingsForm: document.querySelector("#settings-form"),
   ftePreview: document.querySelector("#fte-preview"),
   mappingForm: document.querySelector("#mapping-form"),
@@ -177,6 +179,14 @@ function mergeBaselineRows(existingRows) {
   let rows = Array.isArray(existingRows)
     ? existingRows.filter((row) => row.shiftName !== "Imported Baseline")
     : [];
+  rows = rows.map((row) =>
+    normalizeName(row.subDepartment) === "guest experience"
+      ? {
+          ...row,
+          mainDepartment: "Guest Experience",
+        }
+      : row,
+  );
   const knownKeys = new Set(
     rows.map(
       (row) =>
@@ -184,18 +194,24 @@ function mergeBaselineRows(existingRows) {
     ),
   );
   DEMO_BASELINE_ROWS.forEach((row) => {
-    const key = `${normalizeName(row.mainDepartment)}|||${normalizeName(row.subDepartment)}|||${normalizeName(row.shiftName)}|||${normalizeName(row.positionName)}|||${row.rowType || "shift"}`;
+    const normalizedRow = normalizeName(row.subDepartment) === "guest experience"
+      ? {
+          ...row,
+          mainDepartment: "Guest Experience",
+        }
+      : row;
+    const key = `${normalizeName(normalizedRow.mainDepartment)}|||${normalizeName(normalizedRow.subDepartment)}|||${normalizeName(normalizedRow.shiftName)}|||${normalizeName(normalizedRow.positionName)}|||${normalizedRow.rowType || "shift"}`;
     if (!knownKeys.has(key)) {
-      rows.push(structuredClone(row));
+      rows.push(structuredClone(normalizedRow));
       return;
     }
-    if ((row.rowType || "shift") !== "summary" || !row.budgetHeadcount) return;
+    if ((normalizedRow.rowType || "shift") !== "summary" || !normalizedRow.budgetHeadcount) return;
     rows = rows.map((existingRow) => {
       const existingKey = `${normalizeName(existingRow.mainDepartment)}|||${normalizeName(existingRow.subDepartment)}|||${normalizeName(existingRow.shiftName)}|||${normalizeName(existingRow.positionName)}|||${existingRow.rowType || "shift"}`;
       if (existingKey !== key || existingRow.budgetHeadcount) return existingRow;
       return {
         ...existingRow,
-        budgetHeadcount: row.budgetHeadcount,
+        budgetHeadcount: normalizedRow.budgetHeadcount,
       };
     });
   });
@@ -247,6 +263,15 @@ function seedForms() {
   elements.settingsForm.elements.annualDays.value = state.settings.annualDays;
   elements.settingsForm.elements.daysOff.value = state.settings.daysOff;
   elements.settingsForm.elements.publicHolidays.value = state.settings.publicHolidays;
+  seedDepartmentForm();
+}
+
+function seedDepartmentForm() {
+  const departments = [...new Set(state.baselineRows.map((row) => row.mainDepartment))].sort((a, b) => a.localeCompare(b));
+  elements.departmentForm.elements.currentDepartment.innerHTML = [
+    '<option value="">Add new department only</option>',
+    ...departments.map((department) => `<option value="${escapeHtml(department)}">${escapeHtml(department)}</option>`),
+  ].join("");
 }
 
 function bindEvents() {
@@ -362,6 +387,43 @@ function bindEvents() {
       publicHolidays: Number(form.get("publicHolidays")),
     };
     saveState();
+    render();
+  });
+
+  elements.departmentForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!isAdmin()) return;
+    const form = new FormData(event.currentTarget);
+    const currentDepartment = String(form.get("currentDepartment") || "").trim();
+    const departmentName = String(form.get("departmentName") || "").trim();
+
+    if (!departmentName) {
+      elements.departmentStatus.innerHTML = "<p>Department name is required.</p>";
+      return;
+    }
+
+    if (!currentDepartment) {
+      elements.departmentStatus.innerHTML = `<p>New department <strong>${escapeHtml(departmentName)}</strong> is now available. Add baseline rows using that main department name in Baseline Shift.</p>`;
+      event.currentTarget.reset();
+      seedDepartmentForm();
+      return;
+    }
+
+    state.baselineRows = state.baselineRows.map((row) =>
+      row.mainDepartment === currentDepartment
+        ? {
+            ...row,
+            mainDepartment: departmentName,
+          }
+        : row,
+    );
+    reprocessCurrentRosterWithMappings();
+    const saved = await saveState();
+    elements.departmentStatus.innerHTML = saved === false
+      ? `<p>Department renamed locally from <strong>${escapeHtml(currentDepartment)}</strong> to <strong>${escapeHtml(departmentName)}</strong>, but the server copy could not be updated.</p>`
+      : `<p>Department renamed from <strong>${escapeHtml(currentDepartment)}</strong> to <strong>${escapeHtml(departmentName)}</strong>.</p>`;
+    event.currentTarget.reset();
+    seedDepartmentForm();
     render();
   });
 
@@ -488,6 +550,7 @@ function activateView(viewName) {
     mapping: ["Department Mapping", "Align Paste RS names and misspellings with baseline-controlled department names."],
     roster: ["Paste RS", "Paste daily or weekly roster rows and validate them before compliance calculations run."],
     compliance: ["Compliance", "Compare baseline need against roster actual and highlight shortages or excess staffing."],
+    "blank-check": ["Blank Roster Check", "Review rows and days where roster values were left blank before final staffing review."],
   };
 
   elements.viewTitle.textContent = titles[viewName][0];
@@ -662,6 +725,13 @@ function renderShortageTable(complianceSummary) {
 }
 
 function renderBaselineTable() {
+  const baselineSummary = aggregateBaseline(state.baselineRows);
+  const summaryLookup = new Map(
+    baselineSummary.map((entry) => [
+      `${normalizeName(entry.mainDepartment)}|||${normalizeName(entry.subDepartment)}`,
+      entry,
+    ]),
+  );
   const sortedRows = [...state.baselineRows].sort((left, right) =>
     `${left.mainDepartment}|${left.subDepartment}|${left.rowType === "summary" ? "zz" : "aa"}|${left.shiftName}|${left.positionName}`.localeCompare(
       `${right.mainDepartment}|${right.subDepartment}|${right.rowType === "summary" ? "zz" : "aa"}|${right.shiftName}|${right.positionName}`,
@@ -675,10 +745,17 @@ function renderBaselineTable() {
 
   sortedRows.forEach((row) => {
     if (selectedDepartment !== "all" && row.mainDepartment !== selectedDepartment) return;
-    const weeklyTotal = row.weeklyTotal ?? DAYS.reduce((sum, day) => sum + Number(row[day] || 0), 0);
+    const summaryKey = `${normalizeName(row.mainDepartment)}|||${normalizeName(row.subDepartment)}`;
+    const liveSummary = summaryLookup.get(summaryKey);
+    const displayDayValues = row.rowType === "summary" && liveSummary
+      ? liveSummary.baselineByDay
+      : row;
+    const weeklyTotal = row.rowType === "summary" && liveSummary
+      ? liveSummary.weeklyBaseline
+      : row.weeklyTotal ?? DAYS.reduce((sum, day) => sum + Number(row[day] || 0), 0);
     const actions = isAdmin()
       ? `
-          <button class="inline-button" type="button" data-action="edit-baseline" data-id="${row.id}">Edit</button>
+            <button class="inline-button" type="button" data-action="edit-baseline" data-id="${row.id}">Edit</button>
           <button class="danger-button" type="button" data-action="delete-baseline" data-id="${row.id}">Delete</button>
         `
       : `<span class="status-chip status-warn">View only</span>`;
@@ -703,15 +780,15 @@ function renderBaselineTable() {
     }
 
     markup.push(`
-      <tr class="${row.rowType === "summary" ? "summary-row" : ""}">
-        <td>${escapeHtml(row.mainDepartment)}</td>
-        <td>${escapeHtml(row.subDepartment)}</td>
-        <td>${escapeHtml(row.shiftName)}</td>
-        <td>${escapeHtml(row.rowType === "summary" ? `FTE ${row.requiredFte || ""}`.trim() : row.positionName)}</td>
-        ${DAYS.map((day) => `<td>${row[day]}</td>`).join("")}
-        <td>${weeklyTotal}</td>
-        <td class="actions-cell">${actions}</td>
-      </tr>
+        <tr class="${row.rowType === "summary" ? "summary-row" : ""}">
+          <td>${escapeHtml(row.mainDepartment)}</td>
+          <td>${escapeHtml(row.subDepartment)}</td>
+          <td>${escapeHtml(row.shiftName)}</td>
+          <td>${escapeHtml(row.rowType === "summary" ? `FTE ${row.requiredFte || ""}`.trim() : row.positionName)}</td>
+          ${DAYS.map((day) => `<td>${displayDayValues[day]}</td>`).join("")}
+          <td>${weeklyTotal}</td>
+          <td class="actions-cell">${actions}</td>
+        </tr>
     `);
   });
 
@@ -824,27 +901,52 @@ function renderUploadValidation() {
 }
 
 function renderBlankRosterCheck() {
-  const blanks = collectBlankRosterEntries(state.rosterUpload.rows);
+  const blanks = collectBlankRosterEntries(state.rosterUpload.rows, state.baselineRows);
   if (!blanks.length) {
     elements.blankRosterCheck.innerHTML = "<p>No blank roster cells found. All roster days are updated.</p>";
     return;
   }
 
+  const sortedBlanks = blanks.sort((left, right) =>
+    `${left.mainDepartment}|${left.subDepartment}|${left.employeeName}|${left.employeeId}`.localeCompare(
+      `${right.mainDepartment}|${right.subDepartment}|${right.employeeName}|${right.employeeId}`,
+    ),
+  );
+
   elements.blankRosterCheck.innerHTML = `
     <p><strong>${blanks.length}</strong> blank roster entries found.</p>
-    <div class="history-list">${blanks
-      .map(
-        (entry) => `
-          <div class="history-item">
-            <div>
-              <p><strong>Row ${entry.rowNumber}</strong> | ${escapeHtml(entry.employeeName || "Unknown Employee")}</p>
-              <p>ID: ${escapeHtml(entry.employeeId || "Missing ID")} | Department: ${escapeHtml(entry.rosterDepartment || "Missing Department")}</p>
-              <p>Blank day: ${entry.dayLabel}</p>
-            </div>
-          </div>
-        `,
-      )
-      .join("")}</div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Row</th>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Main Department</th>
+            <th>Sub-Department</th>
+            <th>Paste RS Department</th>
+            <th>Missing Days</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sortedBlanks
+            .map(
+              (entry) => `
+                <tr>
+                  <td>${entry.rowNumber}</td>
+                  <td>${escapeHtml(entry.employeeId || "Missing ID")}</td>
+                  <td>${escapeHtml(entry.employeeName || "Unknown Employee")}</td>
+                  <td>${escapeHtml(entry.mainDepartment || "Unmatched")}</td>
+                  <td>${escapeHtml(entry.subDepartment || "Unmapped")}</td>
+                  <td>${escapeHtml(entry.rosterDepartment || "Missing Department")}</td>
+                  <td>${escapeHtml(entry.missingDays.join(", "))}</td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -1099,17 +1201,49 @@ function collectRosterIssues(rows, baselineRows) {
   return issues;
 }
 
-function collectBlankRosterEntries(rows) {
-  return rows.flatMap((row) =>
-    DAYS.filter((day) => !String(row[day] || "").trim()).map((day) => ({
-      rowNumber: row.sourceRowNumber || "",
-      employeeId: row.employeeId,
-      employeeName: row.employeeName,
-      rosterDepartment: row.rosterDepartment,
-      day,
-      dayLabel: day.toUpperCase(),
-    })),
-  );
+function collectBlankRosterEntries(rows, baselineRows) {
+  const departmentLookup = new Map();
+  baselineRows.forEach((row) => {
+    const subDepartmentKey = normalizeName(row.subDepartment);
+    if (!departmentLookup.has(subDepartmentKey)) {
+      departmentLookup.set(subDepartmentKey, row.mainDepartment);
+    }
+  });
+
+  const grouped = new Map();
+
+  rows.forEach((row) => {
+    const missingDays = DAYS.filter((day) => !String(row[day] || "").trim()).map((day) => day.toUpperCase());
+    if (!missingDays.length) return;
+
+    const mainDepartment = departmentLookup.get(normalizeName(row.mappedSubDepartment)) || "";
+    const key = [
+      normalizeName(mainDepartment),
+      normalizeName(row.mappedSubDepartment),
+      normalizeName(row.employeeId),
+      normalizeName(row.employeeName),
+      row.sourceRowNumber || "",
+    ].join("|||");
+
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        rowNumber: row.sourceRowNumber || "",
+        employeeId: row.employeeId,
+        employeeName: row.employeeName,
+        mainDepartment,
+        subDepartment: row.mappedSubDepartment || "",
+        rosterDepartment: row.rosterDepartment,
+        missingDays: [],
+      });
+    }
+
+    grouped.get(key).missingDays.push(...missingDays);
+  });
+
+  return Array.from(grouped.values()).map((entry) => ({
+    ...entry,
+    missingDays: [...new Set(entry.missingDays)],
+  }));
 }
 
 function buildMismatchSuggestions(rows, baselineRows, mappings) {
