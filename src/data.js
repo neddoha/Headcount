@@ -2,7 +2,7 @@ import { EXTRACTED_BASELINE_ROWS, EXTRACTED_MAPPINGS } from "./workbookSeed.js";
 
 export const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
-export const DEFAULT_NON_WORKING_CODES = ["", "V", "UP", "WO", "AL", "UPL", "PC"];
+export const DEFAULT_NON_WORKING_CODES = ["", "V", "UP", "WO", "AL", "UPL", "PC", "X"];
 
 const AUTO_COMPLIANCE_BUDGETS = {
   "F&B - Electric": "8",

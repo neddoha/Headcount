@@ -118,9 +118,9 @@
               <h3>Shortage Watch</h3>
               <span class="caption">Weekly variance by sub-department</span>
             </div>
-            <div class="table-scroll">
-              <table>
-                <thead>
+              <div class="table-scroll">
+                <table>
+                  <thead>
                   <tr>
                     <th>Main Department</th>
                     <th>Sub-Department</th>
@@ -333,6 +333,14 @@
               <h3>Roster Rows</h3>
               <div class="actions-cell">
                 <label>
+                  <span class="caption">Department Filter</span>
+                  <select id="roster-department-filter"></select>
+                </label>
+                <label>
+                  <span class="caption">Sub-Department Filter</span>
+                  <select id="roster-subdepartment-filter"></select>
+                </label>
+                <label>
                   <span class="caption">Search Rows</span>
                   <input id="roster-search" type="text" placeholder="Search by row, name, ID, or department" />
                 </label>
@@ -396,6 +404,14 @@
               <h3>Attendance Rows</h3>
               <div class="actions-cell">
                 <label>
+                  <span class="caption">Department Filter</span>
+                  <select id="attendance-department-filter"></select>
+                </label>
+                <label>
+                  <span class="caption">Sub-Department Filter</span>
+                  <select id="attendance-subdepartment-filter"></select>
+                </label>
+                <label>
                   <span class="caption">Search Rows</span>
                   <input id="attendance-search" type="text" placeholder="Search by row, name, ID, or department" />
                 </label>
@@ -418,12 +434,13 @@
                     <th>Fri</th>
                     <th>Sat</th>
                   </tr>
-                </thead>
-                <tbody id="attendance-table"></tbody>
-              </table>
-            </div>
-          </article>
-        </section>
+                  </thead>
+                  <tbody id="attendance-table"></tbody>
+                </table>
+              </div>
+              <div id="attendance-summary" class="stacked-copy"></div>
+            </article>
+          </section>
 
         <section class="view" id="compliance-view">
           <article class="panel">

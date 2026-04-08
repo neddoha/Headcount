@@ -48,12 +48,17 @@ const elements = {
   mappingTable: document.querySelector("#mapping-table"),
   mismatchReview: document.querySelector("#mismatch-review"),
   rosterForm: document.querySelector("#roster-form"),
+  rosterDepartmentFilter: document.querySelector("#roster-department-filter"),
+  rosterSubDepartmentFilter: document.querySelector("#roster-subdepartment-filter"),
   rosterSearch: document.querySelector("#roster-search"),
   rosterTable: document.querySelector("#roster-table"),
   uploadValidation: document.querySelector("#upload-validation"),
   attendanceForm: document.querySelector("#attendance-form"),
+  attendanceDepartmentFilter: document.querySelector("#attendance-department-filter"),
+  attendanceSubDepartmentFilter: document.querySelector("#attendance-subdepartment-filter"),
   attendanceSearch: document.querySelector("#attendance-search"),
   attendanceTable: document.querySelector("#attendance-table"),
+  attendanceSummary: document.querySelector("#attendance-summary"),
   attendanceValidation: document.querySelector("#attendance-validation"),
   blankRosterCheck: document.querySelector("#blank-roster-check"),
   complianceDepartmentFilter: document.querySelector("#compliance-department-filter"),
@@ -74,6 +79,10 @@ const state = await initializeState();
 const viewState = {
   baselineDepartment: "all",
   complianceDepartment: "all",
+  rosterDepartment: "all",
+  rosterSubDepartment: "all",
+  attendanceDepartment: "all",
+  attendanceSubDepartment: "all",
   rosterSearch: "",
   attendanceSearch: "",
 };
@@ -364,9 +373,33 @@ function bindEvents() {
     renderComplianceTable(complianceSummary);
   });
 
+  elements.rosterDepartmentFilter.addEventListener("change", (event) => {
+    viewState.rosterDepartment = event.target.value;
+    viewState.rosterSubDepartment = "all";
+    renderDepartmentFilters();
+    renderRosterTable();
+  });
+
+  elements.rosterSubDepartmentFilter.addEventListener("change", (event) => {
+    viewState.rosterSubDepartment = event.target.value;
+    renderRosterTable();
+  });
+
   elements.rosterSearch.addEventListener("input", (event) => {
     viewState.rosterSearch = event.target.value.trim().toLowerCase();
     renderRosterTable();
+  });
+
+  elements.attendanceDepartmentFilter.addEventListener("change", (event) => {
+    viewState.attendanceDepartment = event.target.value;
+    viewState.attendanceSubDepartment = "all";
+    renderDepartmentFilters();
+    renderAttendanceTable();
+  });
+
+  elements.attendanceSubDepartmentFilter.addEventListener("change", (event) => {
+    viewState.attendanceSubDepartment = event.target.value;
+    renderAttendanceTable();
   });
 
   elements.attendanceSearch.addEventListener("input", (event) => {
@@ -655,11 +688,25 @@ function renderDepartmentFilters() {
   const options = ['<option value="all">All Departments</option>']
     .concat(departments.map((department) => `<option value="${escapeHtml(department)}">${escapeHtml(department)}</option>`))
     .join("");
+  const rosterSubDepartments = getSubDepartmentOptions(state.baselineRows, viewState.rosterDepartment);
+  const attendanceSubDepartments = getSubDepartmentOptions(state.baselineRows, viewState.attendanceDepartment);
+  const subDepartmentOptions = (items) =>
+    ['<option value="all">All Sub-Departments</option>']
+      .concat(items.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`))
+      .join("");
 
   elements.baselineDepartmentFilter.innerHTML = options;
   elements.complianceDepartmentFilter.innerHTML = options;
+  elements.rosterDepartmentFilter.innerHTML = options;
+  elements.attendanceDepartmentFilter.innerHTML = options;
+  elements.rosterSubDepartmentFilter.innerHTML = subDepartmentOptions(rosterSubDepartments);
+  elements.attendanceSubDepartmentFilter.innerHTML = subDepartmentOptions(attendanceSubDepartments);
   elements.baselineDepartmentFilter.value = departments.includes(viewState.baselineDepartment) ? viewState.baselineDepartment : "all";
   elements.complianceDepartmentFilter.value = departments.includes(viewState.complianceDepartment) ? viewState.complianceDepartment : "all";
+  elements.rosterDepartmentFilter.value = departments.includes(viewState.rosterDepartment) ? viewState.rosterDepartment : "all";
+  elements.attendanceDepartmentFilter.value = departments.includes(viewState.attendanceDepartment) ? viewState.attendanceDepartment : "all";
+  elements.rosterSubDepartmentFilter.value = rosterSubDepartments.includes(viewState.rosterSubDepartment) ? viewState.rosterSubDepartment : "all";
+  elements.attendanceSubDepartmentFilter.value = attendanceSubDepartments.includes(viewState.attendanceSubDepartment) ? viewState.attendanceSubDepartment : "all";
 }
 
 function renderSessionState() {
@@ -926,8 +973,12 @@ function renderMismatchReview() {
 
 function renderRosterTable() {
   const search = viewState.rosterSearch;
+  const departmentLookup = buildDepartmentLookup(state.baselineRows);
   elements.rosterTable.innerHTML = state.rosterUpload.rows
     .filter((row) => {
+      const mainDepartment = departmentLookup.get(normalizeName(row.mappedSubDepartment)) || "";
+      if (viewState.rosterDepartment !== "all" && mainDepartment !== viewState.rosterDepartment) return false;
+      if (viewState.rosterSubDepartment !== "all" && row.mappedSubDepartment !== viewState.rosterSubDepartment) return false;
       if (!search) return true;
       const haystack = [
         row.sourceRowNumber,
@@ -935,6 +986,7 @@ function renderRosterTable() {
         row.employeeName,
         row.rosterDepartment,
         row.mappedSubDepartment,
+        mainDepartment,
       ]
         .join(" ")
         .toLowerCase();
@@ -961,8 +1013,12 @@ function renderUploadValidation() {
 
 function renderAttendanceTable() {
   const search = viewState.attendanceSearch;
-  elements.attendanceTable.innerHTML = state.attendanceUpload.rows
+  const departmentLookup = buildDepartmentLookup(state.baselineRows);
+  const filteredRows = state.attendanceUpload.rows
     .filter((row) => {
+      const mainDepartment = departmentLookup.get(normalizeName(row.mappedSubDepartment)) || "";
+      if (viewState.attendanceDepartment !== "all" && mainDepartment !== viewState.attendanceDepartment) return false;
+      if (viewState.attendanceSubDepartment !== "all" && row.mappedSubDepartment !== viewState.attendanceSubDepartment) return false;
       if (!search) return true;
       const haystack = [
         row.sourceRowNumber,
@@ -970,11 +1026,13 @@ function renderAttendanceTable() {
         row.employeeName,
         row.rosterDepartment,
         row.mappedSubDepartment,
+        mainDepartment,
       ]
         .join(" ")
         .toLowerCase();
       return haystack.includes(search);
     })
+  elements.attendanceTable.innerHTML = filteredRows
     .map((row) => `
       <tr>
         <td>${row.sourceRowNumber}</td>
@@ -986,6 +1044,34 @@ function renderAttendanceTable() {
       </tr>
     `)
     .join("");
+  renderAttendanceSummary(filteredRows, departmentLookup);
+}
+
+function renderAttendanceSummary(filteredRows, departmentLookup) {
+  const presentByDay = emptyDayMap();
+  const countedCodes = { OW: 0, PW: 0, R: 0 };
+  filteredRows.forEach((row) => {
+    DAYS.forEach((day) => {
+      const code = String(row[day] || "").trim().toUpperCase();
+      if (countedCodes[code] !== undefined) {
+        countedCodes[code] += 1;
+      }
+      if (countsAsWorking(code)) {
+        presentByDay[day] += 1;
+      }
+    });
+  });
+  const mainDepartmentLabel = viewState.attendanceDepartment === "all" ? "All Departments" : viewState.attendanceDepartment;
+  const subDepartmentLabel = viewState.attendanceSubDepartment === "all" ? "All Sub-Departments" : viewState.attendanceSubDepartment;
+  const mappedCount = filteredRows.filter((row) => departmentLookup.get(normalizeName(row.mappedSubDepartment)) || row.mappedSubDepartment).length;
+  const countedTotal = countedCodes.OW + countedCodes.PW + countedCodes.R;
+  elements.attendanceSummary.innerHTML = `
+    <p><strong>Filtered attendance rows:</strong> ${filteredRows.length}</p>
+    <p><strong>Department:</strong> ${escapeHtml(mainDepartmentLabel)} | <strong>Sub-Department:</strong> ${escapeHtml(subDepartmentLabel)}</p>
+    <p><strong>Mapped rows in selection:</strong> ${mappedCount}</p>
+    <p><strong>OW count:</strong> ${countedCodes.OW} | <strong>PW count:</strong> ${countedCodes.PW} | <strong>R count:</strong> ${countedCodes.R} | <strong>Total counted:</strong> ${countedTotal}</p>
+    <p><strong>Present count by day:</strong> Sun ${presentByDay.sun}, Mon ${presentByDay.mon}, Tue ${presentByDay.tue}, Wed ${presentByDay.wed}, Thu ${presentByDay.thu}, Fri ${presentByDay.fri}, Sat ${presentByDay.sat}</p>
+  `;
 }
 
 function renderAttendanceValidation() {
@@ -1062,9 +1148,9 @@ function renderComplianceTable(complianceSummary) {
       `);
       rows.push(buildMetricRow(entry, "Baseline Need", entry.baselineByDay, entry.weeklyBaseline));
       rows.push(buildMetricRow(entry, "Roster Actual", entry.actualByDay, entry.weeklyActual));
-      rows.push(buildMetricRow(entry, "Baseline vs Roster", entry.baselineVarianceByDay, entry.weeklyBaselineVariance));
+      rows.push(buildMetricRow(entry, "Roster Actual - Baseline Need", entry.baselineVarianceByDay, entry.weeklyBaselineVariance));
       rows.push(buildMetricRow(entry, "Attendance Actual", entry.attendanceByDay, entry.weeklyAttendance));
-      rows.push(buildMetricRow(entry, "Roster vs Attendance", entry.rosterAttendanceVarianceByDay, entry.weeklyRosterAttendanceVariance));
+      rows.push(buildMetricRow(entry, "Attendance Actual - Roster Actual", entry.rosterAttendanceVarianceByDay, entry.weeklyRosterAttendanceVariance));
       rows.push(
         buildMetricRow(
           entry,
@@ -1211,8 +1297,8 @@ function buildComplianceRows(baselineSummary, rosterRows, attendanceRows) {
     const baselineVarianceByDay = emptyDayMap();
     const rosterAttendanceVarianceByDay = emptyDayMap();
     DAYS.forEach((day) => {
-      baselineVarianceByDay[day] = baselineEntry.baselineByDay[day] - actualByDay[day];
-      rosterAttendanceVarianceByDay[day] = actualByDay[day] - attendanceByDay[day];
+      baselineVarianceByDay[day] = actualByDay[day] - baselineEntry.baselineByDay[day];
+      rosterAttendanceVarianceByDay[day] = attendanceByDay[day] - actualByDay[day];
     });
 
     return {
@@ -1248,7 +1334,7 @@ function createRosterUpload(label, rawText, mappings, baselineRows) {
 }
 
 function createAttendanceUpload(label, rawText, mappings, baselineRows) {
-  const rows = parseStaffingText(rawText, mappings);
+  const rows = parseStaffingText(rawText, mappings, { stripLeadingEmptyDay: true });
   return {
     label,
     createdAt: new Date().toISOString(),
@@ -1283,7 +1369,7 @@ function reprocessCurrentRosterWithMappings() {
   );
 }
 
-function parseStaffingText(rawText, mappings) {
+function parseStaffingText(rawText, mappings, options = {}) {
   const mappingMap = new Map(mappings.map((mapping) => [normalizeName(mapping.sourceName), mapping.targetName]));
   Object.entries(FORCED_MAPPING_OVERRIDES).forEach(([sourceKey, targetName]) => {
     mappingMap.set(sourceKey, targetName);
@@ -1302,7 +1388,11 @@ function parseStaffingText(rawText, mappings) {
         ["id", "employee id"].includes(normalizeName(employeeId)) ||
         (!/\d/.test(employeeId) && (!employeeName || !rosterDepartment));
       if (skipLine) return null;
-      const codes = rawCodes[0] === "" && rawCodes.length > 7 ? rawCodes.slice(1) : rawCodes;
+      const codes = options.stripLeadingEmptyDay && rawCodes[0] === ""
+        ? rawCodes.slice(1)
+        : rawCodes[0] === "" && rawCodes.length > 7
+          ? rawCodes.slice(1)
+          : rawCodes;
       return {
         sourceRowNumber,
         employeeId: employeeId || "",
@@ -1314,6 +1404,7 @@ function parseStaffingText(rawText, mappings) {
     })
     .filter(Boolean);
 }
+
 
 function collectRosterIssues(rows, baselineRows) {
   const issues = [];
@@ -1512,6 +1603,25 @@ function countsAsWorking(code) {
 
 function emptyDayMap() {
   return { sun: 0, mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0 };
+}
+
+function buildDepartmentLookup(rows) {
+  const lookup = new Map();
+  rows.forEach((row) => {
+    const key = normalizeName(row.subDepartment);
+    if (!lookup.has(key)) {
+      lookup.set(key, row.mainDepartment);
+    }
+  });
+  return lookup;
+}
+
+function getSubDepartmentOptions(rows, mainDepartment) {
+  return [...new Set(
+    rows
+      .filter((row) => mainDepartment === "all" || row.mainDepartment === mainDepartment)
+      .map((row) => row.subDepartment),
+  )].sort((a, b) => a.localeCompare(b));
 }
 
 function sumDayMap(dayMap) {
