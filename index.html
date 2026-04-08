@@ -50,6 +50,7 @@
           <button class="nav-link" data-view="baseline">Baseline Setup</button>
           <button class="nav-link" data-view="mapping">Department Mapping</button>
           <button class="nav-link" data-view="roster">Paste RS</button>
+          <button class="nav-link" data-view="attendance">Attendance</button>
           <button class="nav-link" data-view="compliance">Compliance</button>
           <button class="nav-link" data-view="blank-check">Blank Roster Check</button>
         </nav>
@@ -356,6 +357,69 @@
                   </tr>
                 </thead>
                 <tbody id="roster-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="attendance-view">
+          <div class="grid two-up">
+            <article class="panel">
+              <h3>Attendance Intake</h3>
+              <form id="attendance-form" class="form-grid">
+                <label>
+                  Upload Label
+                  <input name="uploadLabel" value="Attendance Demo" required />
+                </label>
+                <label class="full-span">
+                  Paste tab-separated attendance rows with columns:
+                  <code>ID Name Department Sun Mon Tue Wed Thu Fri Sat</code>
+                  <textarea
+                    name="attendanceText"
+                    rows="12"
+                    placeholder="100011[TAB]Chathura[TAB]Engineering[TAB]R[TAB]R..."
+                    required
+                  ></textarea>
+                </label>
+                <button class="primary-button" type="submit">Process Attendance</button>
+              </form>
+            </article>
+
+            <article class="panel">
+              <h3>Attendance Validation</h3>
+              <div id="attendance-validation" class="stacked-copy"></div>
+            </article>
+          </div>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Attendance Rows</h3>
+              <div class="actions-cell">
+                <label>
+                  <span class="caption">Search Rows</span>
+                  <input id="attendance-search" type="text" placeholder="Search by row, name, ID, or department" />
+                </label>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Row</th>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Attendance Department</th>
+                    <th>Mapped Baseline</th>
+                    <th>Sun</th>
+                    <th>Mon</th>
+                    <th>Tue</th>
+                    <th>Wed</th>
+                    <th>Thu</th>
+                    <th>Fri</th>
+                    <th>Sat</th>
+                  </tr>
+                </thead>
+                <tbody id="attendance-table"></tbody>
               </table>
             </div>
           </article>

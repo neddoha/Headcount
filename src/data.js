@@ -84,3 +84,11 @@ export const DEMO_ROSTER_TEXT = `100011\tAmina Noor\tF&B - Electric\tP\tP\tP\tP\
 100015\tLayla Kareem\tConceagre\tP\tP\tP\tWO\tP\tP\tP
 100016\tOmar Nabil\tFront Office\tP\tP\tP\tP\tP\tWO\tP
 100017\tSara Iqbal\tNed SPA\tP\tP\tAL\tP\tP\tP\tP`;
+
+export const DEMO_ATTENDANCE_TEXT = `100011\tAmina Noor\tF&B - Electric\tR\tR\tR\tR\tR\tR\tR
+100012\tRafi Ahmed\tF&B - Electric\tR\tWO\tR\tR\tR\tR\tR
+100013\tMila Joseph\tF&B - Cecconis\tR\tR\tR\tR\tR\tR\tR
+100014\tKabir Hasan\tF&B - Cecconis\tR\tR\tWO\tR\tR\tR\tR
+100015\tLayla Kareem\tConceagre\tR\tR\tR\tWO\tR\tR\tR
+100016\tOmar Nabil\tFront Office\tR\tR\tR\tR\tR\tWO\tR
+100017\tSara Iqbal\tNed SPA\tR\tR\tAL\tR\tR\tR\tR`;

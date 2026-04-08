@@ -440,6 +440,12 @@ th {
   border-color: rgba(29, 122, 88, 0.14);
 }
 
+.metric-pill-attendance {
+  background: rgba(64, 102, 176, 0.12);
+  color: #23488f;
+  border-color: rgba(64, 102, 176, 0.16);
+}
+
 .metric-pill-variance {
   background: rgba(184, 115, 28, 0.13);
   color: #87540d;
@@ -471,6 +477,10 @@ th {
 
 .actual-row td {
   background: rgba(29, 122, 88, 0.035);
+}
+
+.attendance-row td {
+  background: rgba(64, 102, 176, 0.04);
 }
 
 .variance-row td {

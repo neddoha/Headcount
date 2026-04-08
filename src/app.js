@@ -1,6 +1,7 @@
 import {
   DAYS,
   DEFAULT_NON_WORKING_CODES,
+  DEMO_ATTENDANCE_TEXT,
   DEMO_BASELINE_ROWS,
   DEMO_MAPPINGS,
   DEMO_ROSTER_TEXT,
@@ -13,6 +14,8 @@ const storageKeys = {
   settings: "shift-headcount-settings",
   rosterUpload: "shift-headcount-roster-upload",
   rosterHistory: "shift-headcount-roster-history",
+  attendanceUpload: "shift-headcount-attendance-upload",
+  attendanceHistory: "shift-headcount-attendance-history",
 };
 
 const elements = {
@@ -48,6 +51,10 @@ const elements = {
   rosterSearch: document.querySelector("#roster-search"),
   rosterTable: document.querySelector("#roster-table"),
   uploadValidation: document.querySelector("#upload-validation"),
+  attendanceForm: document.querySelector("#attendance-form"),
+  attendanceSearch: document.querySelector("#attendance-search"),
+  attendanceTable: document.querySelector("#attendance-table"),
+  attendanceValidation: document.querySelector("#attendance-validation"),
   blankRosterCheck: document.querySelector("#blank-roster-check"),
   complianceDepartmentFilter: document.querySelector("#compliance-department-filter"),
   complianceTable: document.querySelector("#compliance-table"),
@@ -68,6 +75,7 @@ const viewState = {
   baselineDepartment: "all",
   complianceDepartment: "all",
   rosterSearch: "",
+  attendanceSearch: "",
 };
 
 seedForms();
@@ -98,9 +106,12 @@ function loadStateFromLocal() {
   const mappings = loadJSON(storageKeys.mappings, DEMO_MAPPINGS);
   const settings = loadJSON(storageKeys.settings, DEMO_SETTINGS);
   const demoUpload = createRosterUpload("Week 1 Demo", DEMO_ROSTER_TEXT, DEMO_MAPPINGS, baselineRows);
+  const demoAttendance = createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, DEMO_MAPPINGS, baselineRows);
   const rosterUpload = loadJSON(storageKeys.rosterUpload, demoUpload);
   const rosterHistory = loadJSON(storageKeys.rosterHistory, [historySnapshot(demoUpload)]);
-  return { baselineRows, mappings, settings, rosterUpload, rosterHistory };
+  const attendanceUpload = loadJSON(storageKeys.attendanceUpload, demoAttendance);
+  const attendanceHistory = loadJSON(storageKeys.attendanceHistory, [historySnapshot(demoAttendance)]);
+  return { baselineRows, mappings, settings, rosterUpload, rosterHistory, attendanceUpload, attendanceHistory };
 }
 
 function loadJSON(key, fallback) {
@@ -135,11 +146,13 @@ async function persistStateToApi() {
         state: {
           baselineRows: state.baselineRows,
           mappings: state.mappings,
-          settings: state.settings,
-          rosterUpload: state.rosterUpload,
-          rosterHistory: state.rosterHistory,
-        },
-      }),
+        settings: state.settings,
+        rosterUpload: state.rosterUpload,
+        rosterHistory: state.rosterHistory,
+        attendanceUpload: state.attendanceUpload,
+        attendanceHistory: state.attendanceHistory,
+      },
+    }),
     });
     return response.ok;
   } catch {
@@ -155,6 +168,8 @@ function applyLoadedState(loadedState) {
   state.settings = reconciled.settings;
   state.rosterUpload = reconciled.rosterUpload;
   state.rosterHistory = reconciled.rosterHistory;
+  state.attendanceUpload = reconciled.attendanceUpload;
+  state.attendanceHistory = reconciled.attendanceHistory;
   seedForms();
 }
 
@@ -172,7 +187,16 @@ function reconcileLoadedState(loadedState) {
       )
     : createRosterUpload("Week 1 Demo", DEMO_ROSTER_TEXT, mappings, baselineRows);
   const rosterHistory = source.rosterHistory || [historySnapshot(rosterUpload)];
-  return { baselineRows, mappings, settings, rosterUpload, rosterHistory };
+  const attendanceUpload = source.attendanceUpload?.rawText
+    ? createAttendanceUpload(
+        source.attendanceUpload.label || "Latest Attendance",
+        source.attendanceUpload.rawText,
+        mappings,
+        baselineRows,
+      )
+    : createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, mappings, baselineRows);
+  const attendanceHistory = source.attendanceHistory || [historySnapshot(attendanceUpload)];
+  return { baselineRows, mappings, settings, rosterUpload, rosterHistory, attendanceUpload, attendanceHistory };
 }
 
 function mergeBaselineRows(existingRows) {
@@ -180,10 +204,11 @@ function mergeBaselineRows(existingRows) {
     ? existingRows.filter((row) => row.shiftName !== "Imported Baseline")
     : [];
   rows = rows.map((row) =>
-    normalizeName(row.subDepartment) === "guest experience"
+    ["guest experience", "engineering"].includes(normalizeName(row.subDepartment))
       ? {
           ...row,
-          mainDepartment: "Guest Experience",
+          mainDepartment: normalizeName(row.subDepartment) === "engineering" ? "Engineering" : "Guest Experience",
+          subDepartment: normalizeName(row.subDepartment) === "engineering" ? "Engineering" : row.subDepartment,
         }
       : row,
   );
@@ -194,10 +219,11 @@ function mergeBaselineRows(existingRows) {
     ),
   );
   DEMO_BASELINE_ROWS.forEach((row) => {
-    const normalizedRow = normalizeName(row.subDepartment) === "guest experience"
+    const normalizedRow = ["guest experience", "engineering"].includes(normalizeName(row.subDepartment))
       ? {
           ...row,
-          mainDepartment: "Guest Experience",
+          mainDepartment: normalizeName(row.subDepartment) === "engineering" ? "Engineering" : "Guest Experience",
+          subDepartment: normalizeName(row.subDepartment) === "engineering" ? "Engineering" : row.subDepartment,
         }
       : row;
     const key = `${normalizeName(normalizedRow.mainDepartment)}|||${normalizeName(normalizedRow.subDepartment)}|||${normalizeName(normalizedRow.shiftName)}|||${normalizeName(normalizedRow.positionName)}|||${normalizedRow.rowType || "shift"}`;
@@ -253,12 +279,16 @@ async function saveState() {
   localStorage.setItem(storageKeys.settings, JSON.stringify(state.settings));
   localStorage.setItem(storageKeys.rosterUpload, JSON.stringify(state.rosterUpload));
   localStorage.setItem(storageKeys.rosterHistory, JSON.stringify(state.rosterHistory));
+  localStorage.setItem(storageKeys.attendanceUpload, JSON.stringify(state.attendanceUpload));
+  localStorage.setItem(storageKeys.attendanceHistory, JSON.stringify(state.attendanceHistory));
   return await persistStateToApi();
 }
 
 function seedForms() {
   elements.rosterForm.elements.uploadLabel.value = state.rosterUpload.label;
   elements.rosterForm.elements.rosterText.value = state.rosterUpload.rawText;
+  elements.attendanceForm.elements.uploadLabel.value = state.attendanceUpload.label;
+  elements.attendanceForm.elements.attendanceText.value = state.attendanceUpload.rawText;
   elements.settingsForm.elements.weeksInYear.value = state.settings.weeksInYear;
   elements.settingsForm.elements.annualDays.value = state.settings.annualDays;
   elements.settingsForm.elements.daysOff.value = state.settings.daysOff;
@@ -330,7 +360,7 @@ function bindEvents() {
   elements.complianceDepartmentFilter.addEventListener("change", (event) => {
     viewState.complianceDepartment = event.target.value;
     const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows);
+    const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows, state.attendanceUpload.rows);
     renderComplianceTable(complianceSummary);
   });
 
@@ -339,12 +369,19 @@ function bindEvents() {
     renderRosterTable();
   });
 
+  elements.attendanceSearch.addEventListener("input", (event) => {
+    viewState.attendanceSearch = event.target.value.trim().toLowerCase();
+    renderAttendanceTable();
+  });
+
   elements.seedDataBtn.addEventListener("click", () => {
     state.baselineRows = structuredClone(DEMO_BASELINE_ROWS);
     state.mappings = structuredClone(DEMO_MAPPINGS);
     state.settings = structuredClone(DEMO_SETTINGS);
     state.rosterUpload = createRosterUpload("Week 1 Demo", DEMO_ROSTER_TEXT, DEMO_MAPPINGS, state.baselineRows);
+    state.attendanceUpload = createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, DEMO_MAPPINGS, state.baselineRows);
     state.rosterHistory = [historySnapshot(state.rosterUpload)];
+    state.attendanceHistory = [historySnapshot(state.attendanceUpload)];
     seedForms();
     saveState();
     render();
@@ -484,6 +521,22 @@ function bindEvents() {
     activateView("compliance");
   });
 
+  elements.attendanceForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    state.attendanceUpload = createAttendanceUpload(
+      form.get("uploadLabel").trim(),
+      form.get("attendanceText"),
+      state.mappings,
+      state.baselineRows,
+    );
+    state.attendanceHistory.unshift(historySnapshot(state.attendanceUpload));
+    state.attendanceHistory = state.attendanceHistory.slice(0, 8);
+    saveState();
+    render();
+    activateView("compliance");
+  });
+
   elements.baselineTable.addEventListener("click", (event) => {
     if (!isAdmin()) return;
     const button = event.target.closest("button[data-action]");
@@ -544,14 +597,15 @@ function activateView(viewName) {
     view.classList.toggle("active", view.id === `${viewName}-view`);
   });
 
-  const titles = {
-    dashboard: ["Operations Dashboard", "Review staffing baseline, latest roster upload, and department-wise compliance in one place."],
-    baseline: ["Baseline Setup", "Admin users can maintain departments, sub-departments, shifts, and formula assumptions."],
-    mapping: ["Department Mapping", "Align Paste RS names and misspellings with baseline-controlled department names."],
-    roster: ["Paste RS", "Paste daily or weekly roster rows and validate them before compliance calculations run."],
-    compliance: ["Compliance", "Compare baseline need against roster actual and highlight shortages or excess staffing."],
-    "blank-check": ["Blank Roster Check", "Review rows and days where roster values were left blank before final staffing review."],
-  };
+    const titles = {
+      dashboard: ["Operations Dashboard", "Review staffing baseline, latest roster upload, and department-wise compliance in one place."],
+      baseline: ["Baseline Setup", "Admin users can maintain departments, sub-departments, shifts, and formula assumptions."],
+      mapping: ["Department Mapping", "Align Paste RS names and misspellings with baseline-controlled department names."],
+      roster: ["Paste RS", "Paste daily or weekly roster rows and validate them before compliance calculations run."],
+      attendance: ["Attendance", "Paste attendance data and compare actual attendance against roster and baseline."],
+      compliance: ["Compliance", "Compare baseline need against roster actual and highlight shortages or excess staffing."],
+      "blank-check": ["Blank Roster Check", "Review rows and days where roster values were left blank before final staffing review."],
+    };
 
   elements.viewTitle.textContent = titles[viewName][0];
   elements.viewSubtitle.textContent = titles[viewName][1];
@@ -559,7 +613,7 @@ function activateView(viewName) {
 
 function render() {
   const baselineSummary = aggregateBaseline(state.baselineRows);
-  const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows);
+  const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows, state.attendanceUpload.rows);
   renderSessionState();
   renderLoginHint();
   renderDepartmentFilters();
@@ -574,6 +628,8 @@ function render() {
   renderMismatchReview();
   renderRosterTable();
   renderUploadValidation();
+  renderAttendanceTable();
+  renderAttendanceValidation();
   renderBlankRosterCheck();
   renderComplianceTable(complianceSummary);
 }
@@ -678,11 +734,14 @@ function renderSummaryCards(complianceSummary) {
 
 function renderRecentUpload() {
   const createdAt = new Date(state.rosterUpload.createdAt).toLocaleString();
+  const attendanceCreatedAt = new Date(state.attendanceUpload.createdAt).toLocaleString();
   elements.recentUpload.innerHTML = `
-    <p><strong>${escapeHtml(state.rosterUpload.label)}</strong></p>
+    <p><strong>Roster:</strong> ${escapeHtml(state.rosterUpload.label)}</p>
     <p>Uploaded: ${createdAt}</p>
-    <p>Rows: ${state.rosterUpload.rows.length}</p>
-    <p>Issues: ${state.rosterUpload.issues.length}</p>
+    <p>Rows: ${state.rosterUpload.rows.length} | Issues: ${state.rosterUpload.issues.length}</p>
+    <p><strong>Attendance:</strong> ${escapeHtml(state.attendanceUpload.label)}</p>
+    <p>Uploaded: ${attendanceCreatedAt}</p>
+    <p>Rows: ${state.attendanceUpload.rows.length} | Issues: ${state.attendanceUpload.issues.length}</p>
   `;
 }
 
@@ -900,6 +959,41 @@ function renderUploadValidation() {
     : "<p>No upload issues found. Paste RS rows are ready for compliance calculation.</p>";
 }
 
+function renderAttendanceTable() {
+  const search = viewState.attendanceSearch;
+  elements.attendanceTable.innerHTML = state.attendanceUpload.rows
+    .filter((row) => {
+      if (!search) return true;
+      const haystack = [
+        row.sourceRowNumber,
+        row.employeeId,
+        row.employeeName,
+        row.rosterDepartment,
+        row.mappedSubDepartment,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(search);
+    })
+    .map((row) => `
+      <tr>
+        <td>${row.sourceRowNumber}</td>
+        <td>${escapeHtml(row.employeeId)}</td>
+        <td>${escapeHtml(row.employeeName)}</td>
+        <td>${escapeHtml(row.rosterDepartment)}</td>
+        <td>${escapeHtml(row.mappedSubDepartment || "Unmapped")}</td>
+        ${DAYS.map((day) => `<td>${escapeHtml(row[day])}</td>`).join("")}
+      </tr>
+    `)
+    .join("");
+}
+
+function renderAttendanceValidation() {
+  elements.attendanceValidation.innerHTML = state.attendanceUpload.issues.length
+    ? state.attendanceUpload.issues.map((issue) => `<p>${escapeHtml(issue)}</p>`).join("")
+    : "<p>No attendance upload issues found. Attendance rows are ready for compliance comparison.</p>";
+}
+
 function renderBlankRosterCheck() {
   const blanks = collectBlankRosterEntries(state.rosterUpload.rows, state.baselineRows);
   if (!blanks.length) {
@@ -968,7 +1062,9 @@ function renderComplianceTable(complianceSummary) {
       `);
       rows.push(buildMetricRow(entry, "Baseline Need", entry.baselineByDay, entry.weeklyBaseline));
       rows.push(buildMetricRow(entry, "Roster Actual", entry.actualByDay, entry.weeklyActual));
-      rows.push(buildMetricRow(entry, "Variance", entry.varianceByDay, entry.weeklyVariance));
+      rows.push(buildMetricRow(entry, "Baseline vs Roster", entry.baselineVarianceByDay, entry.weeklyBaselineVariance));
+      rows.push(buildMetricRow(entry, "Attendance Actual", entry.attendanceByDay, entry.weeklyAttendance));
+      rows.push(buildMetricRow(entry, "Roster vs Attendance", entry.rosterAttendanceVarianceByDay, entry.weeklyRosterAttendanceVariance));
       rows.push(
         buildMetricRow(
           entry,
@@ -985,10 +1081,11 @@ function renderComplianceTable(complianceSummary) {
 function buildMetricRow(entry, label, byDay, weeklyTotal, requiredFte = "") {
   const rowClass = [
     "compliance-metric-row",
-    label === "Variance" ? "variance-row" : "",
+    label.includes("Variance") ? "variance-row" : "",
     label === "Total (Shifts)" ? "summary-row" : "",
     label === "Baseline Need" ? "baseline-row" : "",
     label === "Roster Actual" ? "actual-row" : "",
+    label === "Attendance Actual" ? "attendance-row" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -1006,10 +1103,10 @@ function buildMetricRow(entry, label, byDay, weeklyTotal, requiredFte = "") {
       ${DAYS.map((day) => {
         const value = isShiftSummary ? "" : byDay[day];
         const cellClasses = ["day-value-cell"];
-        if (label === "Variance") cellClasses.push(varianceCellClass(byDay[day]));
+        if (label.includes("Variance")) cellClasses.push(varianceCellClass(byDay[day]));
         return `<td class="${cellClasses.join(" ")}">${value}</td>`;
       }).join("")}
-      <td class="weekly-total-cell ${label === "Variance" ? varianceCellClass(weeklyTotal) : ""}">${weeklyDisplay}</td>
+      <td class="weekly-total-cell ${label.includes("Variance") ? varianceCellClass(weeklyTotal) : ""}">${weeklyDisplay}</td>
     </tr>
   `;
 }
@@ -1017,7 +1114,8 @@ function buildMetricRow(entry, label, byDay, weeklyTotal, requiredFte = "") {
 function metricPillClass(label) {
   if (label === "Baseline Need") return "baseline";
   if (label === "Roster Actual") return "actual";
-  if (label === "Variance") return "variance";
+  if (label === "Attendance Actual") return "attendance";
+  if (label.includes("Variance")) return "variance";
   return "summary";
 }
 
@@ -1090,7 +1188,7 @@ function aggregateBaseline(rows) {
   }));
 }
 
-function buildComplianceRows(baselineSummary, rosterRows) {
+function buildComplianceRows(baselineSummary, rosterRows, attendanceRows) {
   return baselineSummary.map((baselineEntry) => {
     const actualByDay = emptyDayMap();
     rosterRows
@@ -1101,9 +1199,20 @@ function buildComplianceRows(baselineSummary, rosterRows) {
         });
       });
 
-    const varianceByDay = emptyDayMap();
+    const attendanceByDay = emptyDayMap();
+    attendanceRows
+      .filter((row) => normalizeName(row.mappedSubDepartment) === normalizeName(baselineEntry.subDepartment))
+      .forEach((row) => {
+        DAYS.forEach((day) => {
+          if (countsAsWorking(row[day])) attendanceByDay[day] += 1;
+        });
+      });
+
+    const baselineVarianceByDay = emptyDayMap();
+    const rosterAttendanceVarianceByDay = emptyDayMap();
     DAYS.forEach((day) => {
-      varianceByDay[day] = actualByDay[day] - baselineEntry.baselineByDay[day];
+      baselineVarianceByDay[day] = baselineEntry.baselineByDay[day] - actualByDay[day];
+      rosterAttendanceVarianceByDay[day] = actualByDay[day] - attendanceByDay[day];
     });
 
     return {
@@ -1114,17 +1223,32 @@ function buildComplianceRows(baselineSummary, rosterRows) {
       requiredFte: baselineEntry.summary?.requiredFte || "",
       budgetHeadcount: baselineEntry.summary?.budgetHeadcount || "",
       actualByDay,
-      varianceByDay,
+      attendanceByDay,
+      baselineVarianceByDay,
+      rosterAttendanceVarianceByDay,
       weeklyBaseline: sumDayMap(baselineEntry.baselineByDay),
       weeklySummaryTotal: sumDayMap(baselineEntry.baselineByDay),
       weeklyActual: sumDayMap(actualByDay),
-      weeklyVariance: sumDayMap(varianceByDay),
+      weeklyAttendance: sumDayMap(attendanceByDay),
+      weeklyBaselineVariance: sumDayMap(baselineVarianceByDay),
+      weeklyRosterAttendanceVariance: sumDayMap(rosterAttendanceVarianceByDay),
     };
   });
 }
 
 function createRosterUpload(label, rawText, mappings, baselineRows) {
-  const rows = parseRosterText(rawText, mappings);
+  const rows = parseStaffingText(rawText, mappings);
+  return {
+    label,
+    createdAt: new Date().toISOString(),
+    rows,
+    rawText,
+    issues: collectRosterIssues(rows, baselineRows),
+  };
+}
+
+function createAttendanceUpload(label, rawText, mappings, baselineRows) {
+  const rows = parseStaffingText(rawText, mappings);
   return {
     label,
     createdAt: new Date().toISOString(),
@@ -1141,14 +1265,25 @@ function reprocessCurrentRosterWithMappings() {
     state.mappings,
     state.baselineRows,
   );
+  state.attendanceUpload = createAttendanceUpload(
+    state.attendanceUpload.label || "Latest Attendance",
+    state.attendanceUpload.rawText || "",
+    state.mappings,
+    state.baselineRows,
+  );
   state.rosterHistory = state.rosterHistory.map((item, index) =>
     index === 0
       ? historySnapshot(state.rosterUpload)
       : item,
   );
+  state.attendanceHistory = state.attendanceHistory.map((item, index) =>
+    index === 0
+      ? historySnapshot(state.attendanceUpload)
+      : item,
+  );
 }
 
-function parseRosterText(rawText, mappings) {
+function parseStaffingText(rawText, mappings) {
   const mappingMap = new Map(mappings.map((mapping) => [normalizeName(mapping.sourceName), mapping.targetName]));
   Object.entries(FORCED_MAPPING_OVERRIDES).forEach(([sourceKey, targetName]) => {
     mappingMap.set(sourceKey, targetName);
@@ -1162,16 +1297,22 @@ function parseRosterText(rawText, mappings) {
     .filter((entry) => entry.line)
     .map(({ line, sourceRowNumber }) => {
       const cells = line.split("\t");
-      const [employeeId, employeeName, rosterDepartment, ...codes] = cells;
+      const [employeeId, employeeName, rosterDepartment, ...rawCodes] = cells.map((cell) => cell?.trim() || "");
+      const skipLine = !employeeId ||
+        ["id", "employee id"].includes(normalizeName(employeeId)) ||
+        (!/\d/.test(employeeId) && (!employeeName || !rosterDepartment));
+      if (skipLine) return null;
+      const codes = rawCodes[0] === "" && rawCodes.length > 7 ? rawCodes.slice(1) : rawCodes;
       return {
         sourceRowNumber,
-        employeeId: employeeId?.trim() || "",
-        employeeName: employeeName?.trim() || "",
-        rosterDepartment: rosterDepartment?.trim() || "",
+        employeeId: employeeId || "",
+        employeeName: employeeName || "",
+        rosterDepartment: rosterDepartment || "",
         mappedSubDepartment: (mappingMap.get(normalizeName(rosterDepartment)) || rosterDepartment || "").trim(),
         ...Object.fromEntries(DAYS.map((day, index) => [day, (codes[index] || "").trim()])),
       };
-    });
+    })
+    .filter(Boolean);
 }
 
 function collectRosterIssues(rows, baselineRows) {
@@ -1319,6 +1460,8 @@ function exportState() {
       settings: state.settings,
       rosterUpload: state.rosterUpload,
       rosterHistory: state.rosterHistory,
+      attendanceUpload: state.attendanceUpload,
+      attendanceHistory: state.attendanceHistory,
     },
     null,
     2,
@@ -1362,7 +1505,9 @@ function computeNetWorkingDays(settings) {
 }
 
 function countsAsWorking(code) {
-  return !DEFAULT_NON_WORKING_CODES.includes((code || "").trim().toUpperCase());
+  const normalizedCode = (code || "").trim().toUpperCase();
+  if (["OW", "PW", "R"].includes(normalizedCode)) return true;
+  return !DEFAULT_NON_WORKING_CODES.includes(normalizedCode);
 }
 
 function emptyDayMap() {
