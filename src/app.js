@@ -25,6 +25,7 @@ const elements = {
   loginHint: document.querySelector("#login-hint"),
   sessionSummary: document.querySelector("#session-summary"),
   logoutBtn: document.querySelector("#logout-btn"),
+  headerLogoutBtn: document.querySelector("#header-logout-btn"),
   navLinks: document.querySelectorAll(".nav-link"),
   views: document.querySelectorAll(".view"),
   viewTitle: document.querySelector("#view-title"),
@@ -318,34 +319,73 @@ function bindEvents() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     elements.loginMessage.textContent = "Signing in...";
-      try {
-        const response = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: form.get("username"),
-            password: form.get("password"),
-          }),
-        });
-        const payload = await readJsonResponse(response);
-        if (!response.ok) {
-          elements.loginMessage.textContent = payload?.error || payload?.rawText || "Sign in failed.";
-          return;
-        }
-        currentUser = payload.user;
-        const remoteState = await loadStateFromApi();
-      if (remoteState) {
-        applyLoadedState(remoteState);
+    const credentials = {
+      username: form.get("username"),
+      password: form.get("password"),
+    };
+    const loginRequest = fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(credentials),
+    });
+    const sessionRecoveryRequest = waitForRecoveredSession();
+
+    try {
+      const winner = await Promise.race([
+        promiseWithTimeout(loginRequest, 5000).then(async (response) => ({
+          kind: "login",
+          response,
+          payload: await readJsonResponse(response),
+        })),
+        sessionRecoveryRequest.then((user) => ({
+          kind: "session",
+          user,
+        })),
+      ]);
+
+      if (winner.kind === "session" && winner.user) {
+        currentUser = winner.user;
+        elements.loginMessage.textContent = "";
+        event.currentTarget.reset();
+        finalizeSuccessfulLogin();
+        return;
       }
+
+      const response = winner.response;
+      const payload = winner.payload;
+      if (!response.ok) {
+        elements.loginMessage.textContent = payload?.error || payload?.rawText || "Sign in failed.";
+        return;
+      }
+
+      currentUser = payload.user;
       event.currentTarget.reset();
       elements.loginMessage.textContent = "";
-      render();
+      finalizeSuccessfulLogin(false);
+
+      try {
+        const remoteState = await loadStateFromApi();
+        if (remoteState) {
+          applyLoadedState(remoteState);
+          render();
+        }
+      } catch {
+        // Keep the signed-in session active even if the post-login state refresh fails once.
+      }
     } catch {
-      elements.loginMessage.textContent = "Unable to reach the server.";
+      const recoveredUser = await waitForRecoveredSession();
+      if (recoveredUser) {
+        currentUser = recoveredUser;
+        elements.loginMessage.textContent = "";
+        event.currentTarget.reset();
+        finalizeSuccessfulLogin();
+        return;
+      }
+      elements.loginMessage.textContent = "Unable to reach the server. Please try again.";
     }
   });
 
-  elements.logoutBtn.addEventListener("click", async () => {
+  [elements.logoutBtn, elements.headerLogoutBtn].forEach((button) => button.addEventListener("click", async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } catch {
@@ -353,7 +393,7 @@ function bindEvents() {
     }
     currentUser = null;
     render();
-  });
+  }));
 
   elements.navLinks.forEach((button) => {
     button.addEventListener("click", () => activateView(button.dataset.view));
@@ -714,18 +754,20 @@ function renderSessionState() {
   document.body.classList.toggle("auth-locked", !signedIn);
   elements.loginOverlay.classList.toggle("active", !signedIn);
 
-  if (!signedIn) {
-    elements.sessionSummary.innerHTML = "<p>Not signed in.</p>";
-    elements.logoutBtn.classList.add("is-hidden");
-    setAdminControlsEnabled(false);
-    return;
-  }
+    if (!signedIn) {
+      elements.sessionSummary.innerHTML = "<p>Not signed in.</p>";
+      elements.logoutBtn.classList.add("is-hidden");
+      elements.headerLogoutBtn.classList.add("is-hidden");
+      setAdminControlsEnabled(false);
+      return;
+    }
 
   elements.sessionSummary.innerHTML = `
     <p><strong>${escapeHtml(currentUser.name)}</strong></p>
     <p>${escapeHtml(currentUser.role)}</p>
   `;
   elements.logoutBtn.classList.remove("is-hidden");
+  elements.headerLogoutBtn.classList.remove("is-hidden");
   setAdminControlsEnabled(isAdmin());
 }
 
@@ -1574,6 +1616,31 @@ async function readJsonResponse(response) {
   } catch {
     return { rawText };
   }
+}
+
+function finalizeSuccessfulLogin(reload = true) {
+  render();
+  if (reload) {
+    window.location.reload();
+  }
+}
+
+async function waitForRecoveredSession() {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const recoveredUser = await initializeSession();
+    if (recoveredUser) return recoveredUser;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return null;
+}
+
+function promiseWithTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Timed out")), timeoutMs);
+    }),
+  ]);
 }
 
 function isAdmin() {

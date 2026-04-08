@@ -31,6 +31,8 @@ USERS = {
     },
 }
 
+SESSION_CACHE: dict = {}
+
 
 def ensure_state_store() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -59,12 +61,18 @@ def write_state(payload: dict) -> None:
 
 def read_sessions() -> dict:
     ensure_state_store()
-    return read_json_file(SESSIONS_PATH) or {}
+    return SESSION_CACHE or read_json_file(SESSIONS_PATH) or {}
 
 
 def write_sessions(payload: dict) -> None:
+    global SESSION_CACHE
+    SESSION_CACHE = dict(payload)
     ensure_state_store()
-    write_json_file(SESSIONS_PATH, payload)
+    try:
+        write_json_file(SESSIONS_PATH, payload)
+    except OSError:
+        # Keep the in-memory session cache active even if the local disk is slow or locked.
+        pass
 
 
 def sanitized_session(payload: dict | None) -> dict | None:
@@ -235,7 +243,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
+    global SESSION_CACHE
     ensure_state_store()
+    SESSION_CACHE = read_json_file(SESSIONS_PATH) or {}
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "4173"))
     server = ThreadingHTTPServer((host, port), AppHandler)

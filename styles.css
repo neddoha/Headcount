@@ -160,6 +160,12 @@ textarea {
   align-items: flex-start;
 }
 
+.hero-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .hero-stats {
   display: flex;
   flex-wrap: wrap;
