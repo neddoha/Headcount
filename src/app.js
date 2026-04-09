@@ -76,6 +76,13 @@ const FORCED_MAPPING_OVERRIDES = {
   "f&b - nickel lounge": "F&B - Millies",
 };
 
+const AUTH_BYPASS_ENABLED = true;
+const OPEN_ACCESS_USER = {
+  username: "open-access",
+  name: "Open Access",
+  role: "admin",
+};
+
 const authState = {
   environment: "development",
   usesDefaultCredentials: true,
@@ -109,6 +116,7 @@ async function initializeState() {
 }
 
 async function initializeSession() {
+  if (AUTH_BYPASS_ENABLED) return OPEN_ACCESS_USER;
   try {
     const response = await fetch("/api/auth/session", {
       headers: { Accept: "application/json" },
@@ -744,8 +752,16 @@ function renderDepartmentFilters() {
 
 function renderSessionState() {
   const signedIn = Boolean(currentUser);
-  document.body.classList.toggle("auth-locked", !signedIn);
-  elements.loginOverlay.classList.toggle("active", !signedIn);
+  document.body.classList.toggle("auth-locked", AUTH_BYPASS_ENABLED ? false : !signedIn);
+  elements.loginOverlay.classList.toggle("active", AUTH_BYPASS_ENABLED ? false : !signedIn);
+
+  if (AUTH_BYPASS_ENABLED) {
+    elements.sessionSummary.innerHTML = "<p><strong>Open Access</strong></p><p>Login disabled for now</p>";
+    elements.logoutBtn.classList.add("is-hidden");
+    elements.headerLogoutBtn.classList.add("is-hidden");
+    setAdminControlsEnabled(true);
+    return;
+  }
 
     if (!signedIn) {
       elements.sessionSummary.innerHTML = "<p>Not signed in.</p>";
