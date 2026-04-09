@@ -8,6 +8,7 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, quote
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -150,7 +151,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown API route")
             return
 
-        body = self.read_json_body()
+        body = self.read_request_body()
         if body is None:
             return
 
@@ -159,10 +160,18 @@ class AppHandler(SimpleHTTPRequestHandler):
             password = str(body.get("password", ""))
             account = USERS.get(username)
             if not account or account["password"] != password:
+                if self.is_form_post():
+                    self.redirect_with_message("Invalid username or password.")
+                    return
                 self.send_json({"error": "Invalid username or password."}, status=HTTPStatus.UNAUTHORIZED)
                 return
             session = build_session(username, account)
             self.create_session(session)
+            if self.is_form_post():
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
             self.send_json({"user": sanitized_session(session)})
             return
 
@@ -178,14 +187,26 @@ class AppHandler(SimpleHTTPRequestHandler):
         write_state(body["state"])
         self.send_json({"saved": True})
 
-    def read_json_body(self) -> dict | None:
+    def read_request_body(self) -> dict | None:
         length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(length)
+        content_type = self.headers.get("Content-Type", "").lower()
+        if "application/x-www-form-urlencoded" in content_type:
+            parsed = parse_qs(raw_body.decode("utf-8"), keep_blank_values=True)
+            return {key: values[0] if values else "" for key, values in parsed.items()}
         try:
             return json.loads(raw_body.decode("utf-8"))
         except json.JSONDecodeError:
             self.send_error(HTTPStatus.BAD_REQUEST, "Invalid JSON body")
             return None
+
+    def is_form_post(self) -> bool:
+        return "application/x-www-form-urlencoded" in self.headers.get("Content-Type", "").lower()
+
+    def redirect_with_message(self, message: str) -> None:
+        self.send_response(HTTPStatus.SEE_OTHER)
+        self.send_header("Location", f"/?login_error={quote(message)}")
+        self.end_headers()
 
     def get_current_session_id(self) -> str:
         cookie_header = self.headers.get("Cookie", "")

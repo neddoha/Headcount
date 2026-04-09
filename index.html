@@ -15,7 +15,7 @@
           Admin users can maintain baseline manning, aliases, and assumptions.
           Standard users can paste rosters and review compliance.
         </p>
-        <form id="login-form" class="form-grid">
+        <form id="login-form" class="form-grid" action="/api/auth/login" method="post">
           <label>
             Username
             <input name="username" autocomplete="username" required />
@@ -52,6 +52,7 @@
           <button class="nav-link" data-view="roster">Paste RS</button>
           <button class="nav-link" data-view="attendance">Attendance</button>
           <button class="nav-link" data-view="compliance">Compliance</button>
+          <button class="nav-link" data-view="reports">Reports</button>
           <button class="nav-link" data-view="blank-check">Blank Roster Check</button>
         </nav>
 
@@ -479,11 +480,46 @@
           </article>
         </section>
 
+        <section class="view" id="reports-view">
+          <article class="panel report-shell">
+            <div class="panel-header">
+              <h3>Compliance Reports</h3>
+              <div class="actions-cell">
+                <label>
+                  <span class="caption">Report Type</span>
+                  <select id="reports-type-filter">
+                    <option value="classic">Classic Report</option>
+                    <option value="line">Line Chart</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="caption">Department Filter</span>
+                  <select id="reports-department-filter"></select>
+                </label>
+              </div>
+            </div>
+            <div class="stacked-copy">
+              <p>This report view presents the same compliance data in a visual format so users can quickly understand staffing need, roster coverage, attendance coverage, and the two variance checks.</p>
+            </div>
+            <div id="reports-summary" class="reports-summary"></div>
+            <div id="reports-charts" class="reports-charts"></div>
+          </article>
+        </section>
+
         <section class="view" id="blank-check-view">
           <article class="panel">
             <div class="panel-header">
               <h3>Blank Roster Check</h3>
-              <span class="caption">Rows and days where the roster was left blank in Paste RS</span>
+              <div class="actions-cell">
+                <label>
+                  <span class="caption">Department Filter</span>
+                  <select id="blank-department-filter"></select>
+                </label>
+                <label>
+                  <span class="caption">Sub-Department Filter</span>
+                  <select id="blank-subdepartment-filter"></select>
+                </label>
+              </div>
             </div>
             <div class="stacked-copy">
               <p>This view highlights roster rows that were not updated for one or more days, so users can correct them before reviewing compliance.</p>

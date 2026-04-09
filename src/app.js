@@ -61,9 +61,15 @@ const elements = {
   attendanceTable: document.querySelector("#attendance-table"),
   attendanceSummary: document.querySelector("#attendance-summary"),
   attendanceValidation: document.querySelector("#attendance-validation"),
+  blankDepartmentFilter: document.querySelector("#blank-department-filter"),
+  blankSubDepartmentFilter: document.querySelector("#blank-subdepartment-filter"),
   blankRosterCheck: document.querySelector("#blank-roster-check"),
   complianceDepartmentFilter: document.querySelector("#compliance-department-filter"),
   complianceTable: document.querySelector("#compliance-table"),
+  reportsTypeFilter: document.querySelector("#reports-type-filter"),
+  reportsDepartmentFilter: document.querySelector("#reports-department-filter"),
+  reportsSummary: document.querySelector("#reports-summary"),
+  reportsCharts: document.querySelector("#reports-charts"),
 };
 
 const FORCED_MAPPING_OVERRIDES = {
@@ -80,10 +86,14 @@ const state = await initializeState();
 const viewState = {
   baselineDepartment: "all",
   complianceDepartment: "all",
+  reportsType: "classic",
+  reportsDepartment: "all",
   rosterDepartment: "all",
   rosterSubDepartment: "all",
   attendanceDepartment: "all",
   attendanceSubDepartment: "all",
+  blankDepartment: "all",
+  blankSubDepartment: "all",
   rosterSearch: "",
   attendanceSearch: "",
 };
@@ -100,7 +110,10 @@ async function initializeState() {
 
 async function initializeSession() {
   try {
-    const response = await fetch("/api/auth/session", { headers: { Accept: "application/json" } });
+    const response = await fetch("/api/auth/session", {
+      headers: { Accept: "application/json" },
+      credentials: "include",
+    });
     if (!response.ok) return null;
     const payload = await response.json();
     authState.environment = payload?.auth?.environment || "development";
@@ -136,7 +149,10 @@ function loadJSON(key, fallback) {
 
 async function loadStateFromApi() {
   try {
-    const response = await fetch("/api/state", { headers: { Accept: "application/json" } });
+    const response = await fetch("/api/state", {
+      headers: { Accept: "application/json" },
+      credentials: "include",
+    });
     if (!response.ok) return null;
     const payload = await response.json();
     if (!payload?.state) return null;
@@ -152,6 +168,7 @@ async function persistStateToApi() {
     const response = await fetch("/api/state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({
         state: {
           baselineRows: state.baselineRows,
@@ -315,80 +332,14 @@ function seedDepartmentForm() {
 }
 
 function bindEvents() {
-  elements.loginForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+  elements.loginForm.addEventListener("submit", () => {
     elements.loginMessage.textContent = "Signing in...";
-    const credentials = {
-      username: form.get("username"),
-      password: form.get("password"),
-    };
-    const loginRequest = fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(credentials),
-    });
-    const sessionRecoveryRequest = waitForRecoveredSession();
-
-    try {
-      const winner = await Promise.race([
-        promiseWithTimeout(loginRequest, 5000).then(async (response) => ({
-          kind: "login",
-          response,
-          payload: await readJsonResponse(response),
-        })),
-        sessionRecoveryRequest.then((user) => ({
-          kind: "session",
-          user,
-        })),
-      ]);
-
-      if (winner.kind === "session" && winner.user) {
-        currentUser = winner.user;
-        elements.loginMessage.textContent = "";
-        event.currentTarget.reset();
-        finalizeSuccessfulLogin();
-        return;
-      }
-
-      const response = winner.response;
-      const payload = winner.payload;
-      if (!response.ok) {
-        elements.loginMessage.textContent = payload?.error || payload?.rawText || "Sign in failed.";
-        return;
-      }
-
-      currentUser = payload.user;
-      event.currentTarget.reset();
-      elements.loginMessage.textContent = "";
-      finalizeSuccessfulLogin(false);
-
-      try {
-        const remoteState = await loadStateFromApi();
-        if (remoteState) {
-          applyLoadedState(remoteState);
-          render();
-        }
-      } catch {
-        // Keep the signed-in session active even if the post-login state refresh fails once.
-      }
-    } catch {
-      const recoveredUser = await waitForRecoveredSession();
-      if (recoveredUser) {
-        currentUser = recoveredUser;
-        elements.loginMessage.textContent = "";
-        event.currentTarget.reset();
-        finalizeSuccessfulLogin();
-        return;
-      }
-      elements.loginMessage.textContent = "Unable to reach the server. Please try again.";
-    }
   });
 
-  [elements.logoutBtn, elements.headerLogoutBtn].forEach((button) => button.addEventListener("click", async () => {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } catch {
+    [elements.logoutBtn, elements.headerLogoutBtn].forEach((button) => button.addEventListener("click", async () => {
+      try {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+      } catch {
       // Ignore logout transport failures and clear local session view.
     }
     currentUser = null;
@@ -411,6 +362,20 @@ function bindEvents() {
     const baselineSummary = aggregateBaseline(state.baselineRows);
     const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows, state.attendanceUpload.rows);
     renderComplianceTable(complianceSummary);
+  });
+
+  elements.reportsDepartmentFilter.addEventListener("change", (event) => {
+    viewState.reportsDepartment = event.target.value;
+    const baselineSummary = aggregateBaseline(state.baselineRows);
+    const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows, state.attendanceUpload.rows);
+    renderReports(complianceSummary);
+  });
+
+  elements.reportsTypeFilter.addEventListener("change", (event) => {
+    viewState.reportsType = event.target.value;
+    const baselineSummary = aggregateBaseline(state.baselineRows);
+    const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows, state.attendanceUpload.rows);
+    renderReports(complianceSummary);
   });
 
   elements.rosterDepartmentFilter.addEventListener("change", (event) => {
@@ -440,6 +405,18 @@ function bindEvents() {
   elements.attendanceSubDepartmentFilter.addEventListener("change", (event) => {
     viewState.attendanceSubDepartment = event.target.value;
     renderAttendanceTable();
+  });
+
+  elements.blankDepartmentFilter.addEventListener("change", (event) => {
+    viewState.blankDepartment = event.target.value;
+    viewState.blankSubDepartment = "all";
+    renderDepartmentFilters();
+    renderBlankRosterCheck();
+  });
+
+  elements.blankSubDepartmentFilter.addEventListener("change", (event) => {
+    viewState.blankSubDepartment = event.target.value;
+    renderBlankRosterCheck();
   });
 
   elements.attendanceSearch.addEventListener("input", (event) => {
@@ -674,11 +651,12 @@ function activateView(viewName) {
       dashboard: ["Operations Dashboard", "Review staffing baseline, latest roster upload, and department-wise compliance in one place."],
       baseline: ["Baseline Setup", "Admin users can maintain departments, sub-departments, shifts, and formula assumptions."],
       mapping: ["Department Mapping", "Align Paste RS names and misspellings with baseline-controlled department names."],
-      roster: ["Paste RS", "Paste daily or weekly roster rows and validate them before compliance calculations run."],
-      attendance: ["Attendance", "Paste attendance data and compare actual attendance against roster and baseline."],
-      compliance: ["Compliance", "Compare baseline need against roster actual and highlight shortages or excess staffing."],
-      "blank-check": ["Blank Roster Check", "Review rows and days where roster values were left blank before final staffing review."],
-    };
+        roster: ["Paste RS", "Paste daily or weekly roster rows and validate them before compliance calculations run."],
+        attendance: ["Attendance", "Paste attendance data and compare actual attendance against roster and baseline."],
+        compliance: ["Compliance", "Compare baseline need against roster actual and highlight shortages or excess staffing."],
+        reports: ["Reports", "Review compliance data in a classic visual report format with clear colors and quick comparisons."],
+        "blank-check": ["Blank Roster Check", "Review rows and days where roster values were left blank before final staffing review."],
+      };
 
   elements.viewTitle.textContent = titles[viewName][0];
   elements.viewSubtitle.textContent = titles[viewName][1];
@@ -705,9 +683,16 @@ function render() {
   renderAttendanceValidation();
   renderBlankRosterCheck();
   renderComplianceTable(complianceSummary);
+  renderReports(complianceSummary);
 }
 
 function renderLoginHint() {
+  const loginError = new URLSearchParams(window.location.search).get("login_error");
+  if (loginError) {
+    elements.loginMessage.textContent = loginError;
+    const cleanUrl = `${window.location.pathname}${window.location.hash || ""}`;
+    window.history.replaceState({}, "", cleanUrl);
+  }
   if (!elements.loginHint) return;
   if (authState.environment === "production" && !authState.usesDefaultCredentials) {
     elements.loginHint.innerHTML = `
@@ -730,6 +715,7 @@ function renderDepartmentFilters() {
     .join("");
   const rosterSubDepartments = getSubDepartmentOptions(state.baselineRows, viewState.rosterDepartment);
   const attendanceSubDepartments = getSubDepartmentOptions(state.baselineRows, viewState.attendanceDepartment);
+  const blankSubDepartments = getSubDepartmentOptions(state.baselineRows, viewState.blankDepartment);
   const subDepartmentOptions = (items) =>
     ['<option value="all">All Sub-Departments</option>']
       .concat(items.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`))
@@ -737,16 +723,23 @@ function renderDepartmentFilters() {
 
   elements.baselineDepartmentFilter.innerHTML = options;
   elements.complianceDepartmentFilter.innerHTML = options;
+  elements.reportsDepartmentFilter.innerHTML = options;
   elements.rosterDepartmentFilter.innerHTML = options;
   elements.attendanceDepartmentFilter.innerHTML = options;
+  elements.blankDepartmentFilter.innerHTML = options;
   elements.rosterSubDepartmentFilter.innerHTML = subDepartmentOptions(rosterSubDepartments);
   elements.attendanceSubDepartmentFilter.innerHTML = subDepartmentOptions(attendanceSubDepartments);
+  elements.blankSubDepartmentFilter.innerHTML = subDepartmentOptions(blankSubDepartments);
   elements.baselineDepartmentFilter.value = departments.includes(viewState.baselineDepartment) ? viewState.baselineDepartment : "all";
   elements.complianceDepartmentFilter.value = departments.includes(viewState.complianceDepartment) ? viewState.complianceDepartment : "all";
+  elements.reportsTypeFilter.value = ["classic", "line"].includes(viewState.reportsType) ? viewState.reportsType : "classic";
+  elements.reportsDepartmentFilter.value = departments.includes(viewState.reportsDepartment) ? viewState.reportsDepartment : "all";
   elements.rosterDepartmentFilter.value = departments.includes(viewState.rosterDepartment) ? viewState.rosterDepartment : "all";
   elements.attendanceDepartmentFilter.value = departments.includes(viewState.attendanceDepartment) ? viewState.attendanceDepartment : "all";
+  elements.blankDepartmentFilter.value = departments.includes(viewState.blankDepartment) ? viewState.blankDepartment : "all";
   elements.rosterSubDepartmentFilter.value = rosterSubDepartments.includes(viewState.rosterSubDepartment) ? viewState.rosterSubDepartment : "all";
   elements.attendanceSubDepartmentFilter.value = attendanceSubDepartments.includes(viewState.attendanceSubDepartment) ? viewState.attendanceSubDepartment : "all";
+  elements.blankSubDepartmentFilter.value = blankSubDepartments.includes(viewState.blankSubDepartment) ? viewState.blankSubDepartment : "all";
 }
 
 function renderSessionState() {
@@ -1124,19 +1117,25 @@ function renderAttendanceValidation() {
 
 function renderBlankRosterCheck() {
   const blanks = collectBlankRosterEntries(state.rosterUpload.rows, state.baselineRows);
-  if (!blanks.length) {
+  const filteredBlanks = blanks.filter((entry) => {
+    const departmentMatch = viewState.blankDepartment === "all" || entry.mainDepartment === viewState.blankDepartment;
+    const subDepartmentMatch = viewState.blankSubDepartment === "all" || entry.subDepartment === viewState.blankSubDepartment;
+    return departmentMatch && subDepartmentMatch;
+  });
+
+  if (!filteredBlanks.length) {
     elements.blankRosterCheck.innerHTML = "<p>No blank roster cells found. All roster days are updated.</p>";
     return;
   }
 
-  const sortedBlanks = blanks.sort((left, right) =>
+  const sortedBlanks = filteredBlanks.sort((left, right) =>
     `${left.mainDepartment}|${left.subDepartment}|${left.employeeName}|${left.employeeId}`.localeCompare(
       `${right.mainDepartment}|${right.subDepartment}|${right.employeeName}|${right.employeeId}`,
     ),
   );
 
   elements.blankRosterCheck.innerHTML = `
-    <p><strong>${blanks.length}</strong> blank roster entries found.</p>
+    <p><strong>${filteredBlanks.length}</strong> blank roster entries found.</p>
     <div class="table-scroll">
       <table>
         <thead>
@@ -1206,10 +1205,258 @@ function renderComplianceTable(complianceSummary) {
   elements.complianceTable.innerHTML = rows.join("");
 }
 
+function renderReports(complianceSummary) {
+  const filtered = complianceSummary.filter(
+    (entry) => viewState.reportsDepartment === "all" || entry.mainDepartment === viewState.reportsDepartment,
+  );
+
+  if (!filtered.length) {
+    elements.reportsSummary.innerHTML = "<p>No report data available for the selected department.</p>";
+    elements.reportsCharts.innerHTML = "";
+    return;
+  }
+
+  const summary = {
+    baseline: filtered.reduce((sum, item) => sum + item.weeklyBaseline, 0),
+    roster: filtered.reduce((sum, item) => sum + item.weeklyActual, 0),
+    attendance: filtered.reduce((sum, item) => sum + item.weeklyAttendance, 0),
+    baselineGap: filtered.reduce((sum, item) => sum + item.weeklyBaselineVariance, 0),
+    attendanceGap: filtered.reduce((sum, item) => sum + item.weeklyRosterAttendanceVariance, 0),
+  };
+
+  elements.reportsSummary.innerHTML = `
+    <div class="report-card report-card-baseline">
+      <span>Baseline Need</span>
+      <strong>${summary.baseline}</strong>
+    </div>
+    <div class="report-card report-card-roster">
+      <span>Roster Actual</span>
+      <strong>${summary.roster}</strong>
+    </div>
+    <div class="report-card report-card-attendance">
+      <span>Attendance Actual</span>
+      <strong>${summary.attendance}</strong>
+    </div>
+    <div class="report-card report-card-gap">
+      <span>Roster Actual - Baseline Need</span>
+      <strong>${summary.baselineGap}</strong>
+    </div>
+    <div class="report-card report-card-gap">
+      <span>Attendance Actual - Roster Actual</span>
+      <strong>${summary.attendanceGap}</strong>
+    </div>
+  `;
+
+  if (viewState.reportsType === "line") {
+    const dailySeries = DAYS.map((day) => ({
+      day,
+      baseline: filtered.reduce((sum, item) => sum + item.baselineByDay[day], 0),
+      roster: filtered.reduce((sum, item) => sum + item.actualByDay[day], 0),
+      attendance: filtered.reduce((sum, item) => sum + item.attendanceByDay[day], 0),
+    }));
+
+    const peakValue = Math.max(
+      ...dailySeries.flatMap((item) => [item.baseline, item.roster, item.attendance, 1]),
+    );
+
+    elements.reportsCharts.innerHTML = `
+      <section class="report-section">
+        <div class="panel-header">
+          <h3>Weekly Trend Line</h3>
+          <span class="caption">Baseline, roster, and attendance across Sun to Sat for the selected department view</span>
+        </div>
+        <div class="report-legend">
+          <span class="legend-chip legend-baseline">Baseline</span>
+          <span class="legend-chip legend-roster">Roster</span>
+          <span class="legend-chip legend-attendance">Attendance</span>
+        </div>
+        <div class="report-line-shell">
+          ${buildReportLineChart(dailySeries, peakValue)}
+        </div>
+      </section>
+
+      <section class="report-section">
+        <div class="panel-header">
+          <h3>Daily Totals</h3>
+          <span class="caption">Simple day-by-day totals shown under the same line chart values</span>
+        </div>
+        <div class="report-day-grid">
+          ${dailySeries
+            .map(
+              (item) => `
+                <div class="report-day-card">
+                  <h4>${item.day.toUpperCase()}</h4>
+                  <p><span>Baseline</span><strong>${item.baseline}</strong></p>
+                  <p><span>Roster</span><strong>${item.roster}</strong></p>
+                  <p><span>Attendance</span><strong>${item.attendance}</strong></p>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+    `;
+    return;
+  }
+
+  const maxWeekly = Math.max(...filtered.flatMap((item) => [item.weeklyBaseline, item.weeklyActual, item.weeklyAttendance, 1]));
+
+  elements.reportsCharts.innerHTML = `
+    <section class="report-section">
+      <div class="panel-header">
+        <h3>Weekly Comparison by Sub-Department</h3>
+        <span class="caption">Classic side-by-side bars for baseline, roster, and attendance</span>
+      </div>
+      <div class="report-legend">
+        <span class="legend-chip legend-baseline">Baseline</span>
+        <span class="legend-chip legend-roster">Roster</span>
+        <span class="legend-chip legend-attendance">Attendance</span>
+      </div>
+      <div class="report-bar-list">
+        ${filtered
+          .map(
+            (entry) => `
+              <div class="report-bar-row">
+                <div class="report-bar-label">
+                  <strong>${escapeHtml(entry.subDepartment)}</strong>
+                  <span>${escapeHtml(entry.mainDepartment)}</span>
+                </div>
+                <div class="report-bar-track">
+                  ${buildReportBar("Baseline", entry.weeklyBaseline, maxWeekly, "baseline")}
+                  ${buildReportBar("Roster", entry.weeklyActual, maxWeekly, "roster")}
+                  ${buildReportBar("Attendance", entry.weeklyAttendance, maxWeekly, "attendance")}
+                </div>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+
+    <section class="report-section">
+      <div class="panel-header">
+        <h3>Variance Overview</h3>
+        <span class="caption">Quick visual read of both compliance gaps</span>
+      </div>
+      <div class="report-variance-grid">
+        ${filtered
+          .map(
+            (entry) => `
+              <article class="report-variance-card">
+                <h4>${escapeHtml(entry.subDepartment)}</h4>
+                <p class="report-variance-line">
+                  <span>Roster Actual - Baseline Need</span>
+                  <strong class="${varianceCellClass(entry.weeklyBaselineVariance)}">${entry.weeklyBaselineVariance}</strong>
+                </p>
+                <p class="report-variance-line">
+                  <span>Attendance Actual - Roster Actual</span>
+                  <strong class="${varianceCellClass(entry.weeklyRosterAttendanceVariance)}">${entry.weeklyRosterAttendanceVariance}</strong>
+                </p>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+
+    <section class="report-section">
+      <div class="panel-header">
+        <h3>Daily Snapshot</h3>
+        <span class="caption">Baseline, roster, and attendance totals by day for the selected view</span>
+      </div>
+      <div class="report-day-grid">
+        ${DAYS.map((day) => {
+          const baseline = filtered.reduce((sum, item) => sum + item.baselineByDay[day], 0);
+          const roster = filtered.reduce((sum, item) => sum + item.actualByDay[day], 0);
+          const attendance = filtered.reduce((sum, item) => sum + item.attendanceByDay[day], 0);
+          return `
+            <div class="report-day-card">
+              <h4>${day.toUpperCase()}</h4>
+              <p><span>Baseline</span><strong>${baseline}</strong></p>
+              <p><span>Roster</span><strong>${roster}</strong></p>
+              <p><span>Attendance</span><strong>${attendance}</strong></p>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function buildReportLineChart(series, peakValue) {
+  const width = 860;
+  const height = 250;
+  const padding = { top: 18, right: 22, bottom: 38, left: 44 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(peakValue, 1);
+  const stepX = series.length > 1 ? plotWidth / (series.length - 1) : 0;
+  const yTicks = 4;
+
+  const xAt = (index) => padding.left + (stepX * index);
+  const yAt = (value) => padding.top + plotHeight - ((value / maxValue) * plotHeight);
+  const linePath = (key) => series
+    .map((item, index) => `${index === 0 ? "M" : "L"} ${xAt(index).toFixed(2)} ${yAt(item[key]).toFixed(2)}`)
+    .join(" ");
+  const tickValues = Array.from({ length: yTicks + 1 }, (_, index) => Math.round((maxValue / yTicks) * (yTicks - index)));
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="report-line-chart" role="img" aria-label="Line chart showing baseline, roster, and attendance by day">
+      <rect x="0" y="0" width="${width}" height="${height}" rx="12" fill="#ffffff"></rect>
+      ${tickValues
+        .map((tick) => `
+          <line
+            x1="${padding.left}"
+            y1="${yAt(tick).toFixed(2)}"
+            x2="${width - padding.right}"
+            y2="${yAt(tick).toFixed(2)}"
+            class="report-line-grid"
+          ></line>
+          <text x="${padding.left - 10}" y="${(yAt(tick) + 4).toFixed(2)}" class="report-line-axis-text report-line-axis-y">${tick}</text>
+        `)
+        .join("")}
+      <line x1="${padding.left}" y1="${padding.top + plotHeight}" x2="${width - padding.right}" y2="${padding.top + plotHeight}" class="report-line-axis"></line>
+      <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + plotHeight}" class="report-line-axis"></line>
+      <path d="${linePath("baseline")}" class="report-line-path report-line-path-baseline"></path>
+      <path d="${linePath("roster")}" class="report-line-path report-line-path-roster"></path>
+      <path d="${linePath("attendance")}" class="report-line-path report-line-path-attendance"></path>
+      ${series
+        .flatMap((item, index) => ([
+          buildReportLinePoint(xAt(index), yAt(item.baseline), "baseline", item.baseline, item.day),
+          buildReportLinePoint(xAt(index), yAt(item.roster), "roster", item.roster, item.day),
+          buildReportLinePoint(xAt(index), yAt(item.attendance), "attendance", item.attendance, item.day),
+          `<text x="${xAt(index).toFixed(2)}" y="${height - 12}" text-anchor="middle" class="report-line-axis-text">${item.day.toUpperCase()}</text>`,
+        ]))
+        .join("")}
+    </svg>
+  `;
+}
+
+function buildReportLinePoint(x, y, tone, value, day) {
+  return `
+    <g>
+      <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="6.5" class="report-line-point report-line-point-${tone}"></circle>
+      <title>${day.toUpperCase()} ${tone}: ${value}</title>
+    </g>
+  `;
+}
+
+function buildReportBar(label, value, maxWeekly, tone) {
+  const width = Math.max((value / maxWeekly) * 100, value > 0 ? 8 : 0);
+  return `
+    <div class="report-bar report-bar-${tone}">
+      <span class="report-bar-title">${label}</span>
+      <div class="report-bar-fill" style="width:${width}%"></div>
+      <strong>${value}</strong>
+    </div>
+  `;
+}
+
 function buildMetricRow(entry, label, byDay, weeklyTotal, requiredFte = "") {
+  const isVarianceMetric = isVarianceLabel(label);
   const rowClass = [
     "compliance-metric-row",
-    label.includes("Variance") ? "variance-row" : "",
+    isVarianceMetric ? "variance-row" : "",
     label === "Total (Shifts)" ? "summary-row" : "",
     label === "Baseline Need" ? "baseline-row" : "",
     label === "Roster Actual" ? "actual-row" : "",
@@ -1231,10 +1478,10 @@ function buildMetricRow(entry, label, byDay, weeklyTotal, requiredFte = "") {
       ${DAYS.map((day) => {
         const value = isShiftSummary ? "" : byDay[day];
         const cellClasses = ["day-value-cell"];
-        if (label.includes("Variance")) cellClasses.push(varianceCellClass(byDay[day]));
+        if (isVarianceMetric) cellClasses.push(varianceCellClass(byDay[day]));
         return `<td class="${cellClasses.join(" ")}">${value}</td>`;
       }).join("")}
-      <td class="weekly-total-cell ${label.includes("Variance") ? varianceCellClass(weeklyTotal) : ""}">${weeklyDisplay}</td>
+      <td class="weekly-total-cell ${isVarianceMetric ? varianceCellClass(weeklyTotal) : ""}">${weeklyDisplay}</td>
     </tr>
   `;
 }
@@ -1243,8 +1490,16 @@ function metricPillClass(label) {
   if (label === "Baseline Need") return "baseline";
   if (label === "Roster Actual") return "actual";
   if (label === "Attendance Actual") return "attendance";
-  if (label.includes("Variance")) return "variance";
+  if (isVarianceLabel(label)) return "variance";
   return "summary";
+}
+
+function isVarianceLabel(label) {
+  return [
+    "Variance",
+    "Roster Actual - Baseline Need",
+    "Attendance Actual - Roster Actual",
+  ].includes(label);
 }
 
 function formatFte(value) {
@@ -1270,8 +1525,8 @@ function buildShiftSummaryDisplay(formattedBudget, formattedFte) {
 
 function varianceCellClass(value) {
   const numeric = Number(value || 0);
-  if (numeric < 0) return "variance-negative";
-  if (numeric > 0) return "variance-positive";
+  if (numeric > 0) return "variance-negative";
+  if (numeric < 0) return "variance-positive";
   return "variance-neutral";
 }
 
@@ -1616,31 +1871,6 @@ async function readJsonResponse(response) {
   } catch {
     return { rawText };
   }
-}
-
-function finalizeSuccessfulLogin(reload = true) {
-  render();
-  if (reload) {
-    window.location.reload();
-  }
-}
-
-async function waitForRecoveredSession() {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const recoveredUser = await initializeSession();
-    if (recoveredUser) return recoveredUser;
-    await new Promise((resolve) => setTimeout(resolve, 300));
-  }
-  return null;
-}
-
-function promiseWithTimeout(promise, timeoutMs) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Timed out")), timeoutMs);
-    }),
-  ]);
 }
 
 function isAdmin() {
