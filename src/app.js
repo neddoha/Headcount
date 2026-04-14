@@ -64,6 +64,9 @@ const elements = {
   blankDepartmentFilter: document.querySelector("#blank-department-filter"),
   blankSubDepartmentFilter: document.querySelector("#blank-subdepartment-filter"),
   blankRosterCheck: document.querySelector("#blank-roster-check"),
+  complianceRangeType: document.querySelector("#compliance-range-type"),
+  complianceStartDate: document.querySelector("#compliance-start-date"),
+  complianceEndDate: document.querySelector("#compliance-end-date"),
   complianceDepartmentFilter: document.querySelector("#compliance-department-filter"),
   complianceTable: document.querySelector("#compliance-table"),
   reportsTypeFilter: document.querySelector("#reports-type-filter"),
@@ -91,7 +94,11 @@ const authState = {
 let currentUser = await initializeSession();
 const state = await initializeState();
 let lastSyncedStateSignature = createStateSignature(state);
+let updateStream = null;
 const viewState = {
+  complianceRangeType: "7",
+  complianceStartDate: "",
+  complianceEndDate: "",
   baselineDepartment: "all",
   complianceDepartment: "all",
   reportsType: "classic",
@@ -138,8 +145,9 @@ function loadStateFromLocal() {
   const baselineRows = loadJSON(storageKeys.baselineRows, DEMO_BASELINE_ROWS);
   const mappings = loadJSON(storageKeys.mappings, DEMO_MAPPINGS);
   const settings = loadJSON(storageKeys.settings, DEMO_SETTINGS);
-  const demoUpload = createRosterUpload("Week 1 Demo", DEMO_ROSTER_TEXT, DEMO_MAPPINGS, baselineRows);
-  const demoAttendance = createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, DEMO_MAPPINGS, baselineRows);
+  const defaultWeekStart = getCurrentWeekStart();
+  const demoUpload = createRosterUpload("Week 1 Demo", DEMO_ROSTER_TEXT, DEMO_MAPPINGS, baselineRows, defaultWeekStart);
+  const demoAttendance = createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, DEMO_MAPPINGS, baselineRows, defaultWeekStart);
   const rosterUpload = loadJSON(storageKeys.rosterUpload, demoUpload);
   const rosterHistory = loadJSON(storageKeys.rosterHistory, [historySnapshot(demoUpload)]);
   const attendanceUpload = loadJSON(storageKeys.attendanceUpload, demoAttendance);
@@ -221,18 +229,20 @@ function reconcileLoadedState(loadedState) {
         source.rosterUpload.rawText,
         mappings,
         baselineRows,
+        source.rosterUpload.weekStart || getCurrentWeekStart(),
       )
-    : createRosterUpload("Week 1 Demo", DEMO_ROSTER_TEXT, mappings, baselineRows);
-  const rosterHistory = source.rosterHistory || [historySnapshot(rosterUpload)];
+    : createRosterUpload("Week 1 Demo", DEMO_ROSTER_TEXT, mappings, baselineRows, getCurrentWeekStart());
+  const rosterHistory = normalizeUploadHistory(source.rosterHistory, rosterUpload, "roster", mappings, baselineRows);
   const attendanceUpload = source.attendanceUpload?.rawText
     ? createAttendanceUpload(
         source.attendanceUpload.label || "Latest Attendance",
         source.attendanceUpload.rawText,
         mappings,
         baselineRows,
+        source.attendanceUpload.weekStart || getCurrentWeekStart(),
       )
-    : createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, mappings, baselineRows);
-  const attendanceHistory = source.attendanceHistory || [historySnapshot(attendanceUpload)];
+    : createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, mappings, baselineRows, getCurrentWeekStart());
+  const attendanceHistory = normalizeUploadHistory(source.attendanceHistory, attendanceUpload, "attendance", mappings, baselineRows);
   return { baselineRows, mappings, settings, rosterUpload, rosterHistory, attendanceUpload, attendanceHistory };
 }
 
@@ -323,16 +333,35 @@ async function saveState() {
 }
 
 function startServerSync() {
+  startLiveUpdates();
   setInterval(async () => {
     if (!currentUser || isUserEditingInput()) return;
-    const remoteState = await loadStateFromApi();
-    if (!remoteState) return;
-    const remoteSignature = createStateSignature(remoteState);
-    if (remoteSignature === lastSyncedStateSignature) return;
-    applyLoadedState(remoteState);
-    lastSyncedStateSignature = createStateSignature(state);
-    render();
+    await refreshStateFromServer();
   }, 12000);
+}
+
+function startLiveUpdates() {
+  if (updateStream || !window.EventSource) return;
+  updateStream = new EventSource("/api/updates", { withCredentials: true });
+  updateStream.addEventListener("state", async () => {
+    if (isUserEditingInput()) return;
+    await refreshStateFromServer();
+  });
+  updateStream.addEventListener("error", () => {
+    updateStream?.close();
+    updateStream = null;
+    setTimeout(() => startLiveUpdates(), 5000);
+  });
+}
+
+async function refreshStateFromServer() {
+  const remoteState = await loadStateFromApi();
+  if (!remoteState) return;
+  const remoteSignature = createStateSignature(remoteState);
+  if (remoteSignature === lastSyncedStateSignature) return;
+  applyLoadedState(remoteState);
+  lastSyncedStateSignature = createStateSignature(state);
+  render();
 }
 
 function isUserEditingInput() {
@@ -355,8 +384,10 @@ function createStateSignature(source) {
 
 function seedForms() {
   elements.rosterForm.elements.uploadLabel.value = state.rosterUpload.label;
+  elements.rosterForm.elements.weekStart.value = state.rosterUpload.weekStart || getCurrentWeekStart();
   elements.rosterForm.elements.rosterText.value = state.rosterUpload.rawText;
   elements.attendanceForm.elements.uploadLabel.value = state.attendanceUpload.label;
+  elements.attendanceForm.elements.weekStart.value = state.attendanceUpload.weekStart || getCurrentWeekStart();
   elements.attendanceForm.elements.attendanceText.value = state.attendanceUpload.rawText;
   elements.settingsForm.elements.weeksInYear.value = state.settings.weeksInYear;
   elements.settingsForm.elements.annualDays.value = state.settings.annualDays;
@@ -402,21 +433,65 @@ function bindEvents() {
   elements.complianceDepartmentFilter.addEventListener("change", (event) => {
     viewState.complianceDepartment = event.target.value;
     const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows, state.attendanceUpload.rows);
+    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
     renderComplianceTable(complianceSummary);
+  });
+
+  elements.complianceRangeType.addEventListener("change", (event) => {
+    viewState.complianceRangeType = event.target.value;
+    syncComplianceDateRangeInputs();
+    const baselineSummary = aggregateBaseline(state.baselineRows);
+    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
+    renderComplianceTable(complianceSummary);
+    renderReports(complianceSummary);
+    renderHeroStats(baselineSummary, complianceSummary);
+    renderSummaryCards(complianceSummary);
+    renderShortageTable(complianceSummary);
+    renderRecentUpload();
+  });
+
+  elements.complianceStartDate.addEventListener("change", (event) => {
+    viewState.complianceStartDate = normalizeDateInput(event.target.value);
+    if (viewState.complianceRangeType !== "custom") {
+      syncComplianceDateRangeInputs();
+    } else if (viewState.complianceEndDate < viewState.complianceStartDate) {
+      viewState.complianceEndDate = viewState.complianceStartDate;
+    }
+    const baselineSummary = aggregateBaseline(state.baselineRows);
+    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
+    renderComplianceTable(complianceSummary);
+    renderReports(complianceSummary);
+    renderHeroStats(baselineSummary, complianceSummary);
+    renderSummaryCards(complianceSummary);
+    renderShortageTable(complianceSummary);
+    renderRecentUpload();
+  });
+
+  elements.complianceEndDate.addEventListener("change", (event) => {
+    viewState.complianceRangeType = "custom";
+    viewState.complianceEndDate = normalizeDateInput(event.target.value);
+    syncComplianceDateRangeInputs();
+    const baselineSummary = aggregateBaseline(state.baselineRows);
+    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
+    renderComplianceTable(complianceSummary);
+    renderReports(complianceSummary);
+    renderHeroStats(baselineSummary, complianceSummary);
+    renderSummaryCards(complianceSummary);
+    renderShortageTable(complianceSummary);
+    renderRecentUpload();
   });
 
   elements.reportsDepartmentFilter.addEventListener("change", (event) => {
     viewState.reportsDepartment = event.target.value;
     const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows, state.attendanceUpload.rows);
+    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
     renderReports(complianceSummary);
   });
 
   elements.reportsTypeFilter.addEventListener("change", (event) => {
     viewState.reportsType = event.target.value;
     const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows, state.attendanceUpload.rows);
+    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
     renderReports(complianceSummary);
   });
 
@@ -467,13 +542,15 @@ function bindEvents() {
   });
 
   elements.seedDataBtn.addEventListener("click", () => {
+    const defaultWeekStart = getCurrentWeekStart();
     state.baselineRows = structuredClone(DEMO_BASELINE_ROWS);
     state.mappings = structuredClone(DEMO_MAPPINGS);
     state.settings = structuredClone(DEMO_SETTINGS);
-    state.rosterUpload = createRosterUpload("Week 1 Demo", DEMO_ROSTER_TEXT, DEMO_MAPPINGS, state.baselineRows);
-    state.attendanceUpload = createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, DEMO_MAPPINGS, state.baselineRows);
+    state.rosterUpload = createRosterUpload("Week 1 Demo", DEMO_ROSTER_TEXT, DEMO_MAPPINGS, state.baselineRows, defaultWeekStart);
+    state.attendanceUpload = createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, DEMO_MAPPINGS, state.baselineRows, defaultWeekStart);
     state.rosterHistory = [historySnapshot(state.rosterUpload)];
     state.attendanceHistory = [historySnapshot(state.attendanceUpload)];
+    setComplianceRangeFromWeek(defaultWeekStart);
     seedForms();
     saveState();
     render();
@@ -605,9 +682,10 @@ function bindEvents() {
       form.get("rosterText"),
       state.mappings,
       state.baselineRows,
+      form.get("weekStart"),
     );
-    state.rosterHistory.unshift(historySnapshot(state.rosterUpload));
-    state.rosterHistory = state.rosterHistory.slice(0, 8);
+    upsertUploadHistory("roster", state.rosterUpload);
+    setComplianceRangeFromWeek(state.rosterUpload.weekStart);
     saveState();
     render();
     activateView("compliance");
@@ -621,9 +699,10 @@ function bindEvents() {
       form.get("attendanceText"),
       state.mappings,
       state.baselineRows,
+      form.get("weekStart"),
     );
-    state.attendanceHistory.unshift(historySnapshot(state.attendanceUpload));
-    state.attendanceHistory = state.attendanceHistory.slice(0, 8);
+    upsertUploadHistory("attendance", state.attendanceUpload);
+    setComplianceRangeFromWeek(state.attendanceUpload.weekStart);
     saveState();
     render();
     activateView("compliance");
@@ -683,6 +762,7 @@ function bindEvents() {
     const item = state.rosterHistory[Number(button.dataset.historyIndex)];
     if (!item) return;
     elements.rosterForm.elements.uploadLabel.value = item.label;
+    elements.rosterForm.elements.weekStart.value = item.weekStart || getCurrentWeekStart();
     elements.rosterForm.elements.rosterText.value = item.rawText;
     activateView("roster");
   });
@@ -713,7 +793,9 @@ function activateView(viewName) {
 
 function render() {
   const baselineSummary = aggregateBaseline(state.baselineRows);
-  const complianceSummary = buildComplianceRows(baselineSummary, state.rosterUpload.rows, state.attendanceUpload.rows);
+  initializeComplianceRange();
+  syncComplianceDateRangeInputs();
+  const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
   renderSessionState();
   renderLoginHint();
   renderDepartmentFilters();
@@ -836,9 +918,10 @@ function setAdminControlsEnabled(enabled) {
 function renderHeroStats(baselineSummary, complianceSummary) {
   const shortages = complianceSummary.filter((entry) => entry.weeklyVariance < 0).length;
   const mismatches = unmatchedRosterDepartments(state.rosterUpload.rows, state.baselineRows).length;
+  const activeWeekLabel = formatDateRangeLabel(viewState.complianceStartDate, viewState.complianceEndDate);
   const tiles = [
-    ["Total Work Areas", "Baseline areas currently tracked", String(baselineSummary.length)],
-    ["Departments Short", "Areas below required staffing", String(shortages)],
+    ["Total Work Areas", `Baseline areas tracked for ${activeWeekLabel}`, String(baselineSummary.length)],
+    ["Departments Short", `Areas below required staffing in ${activeWeekLabel}`, String(shortages)],
     ["Mapping Issues", "Paste RS names needing correction", String(mismatches)],
   ];
 
@@ -860,9 +943,9 @@ function renderSummaryCards(complianceSummary) {
   const weeklyActual = complianceSummary.reduce((sum, item) => sum + item.weeklyActual, 0);
   const weeklyVariance = weeklyActual - weeklyBaseline;
   const rows = [
-    ["Baseline Weekly Need", weeklyBaseline],
-    ["Roster Weekly Actual", weeklyActual],
-    ["Variance", weeklyVariance],
+    [`Baseline Weekly Need`, weeklyBaseline],
+    [`Roster Weekly Actual`, weeklyActual],
+    [`Variance`, weeklyVariance],
     ["Mapped Aliases", state.mappings.length],
   ];
 
@@ -872,15 +955,19 @@ function renderSummaryCards(complianceSummary) {
 }
 
 function renderRecentUpload() {
-  const createdAt = new Date(state.rosterUpload.createdAt).toLocaleString();
-  const attendanceCreatedAt = new Date(state.attendanceUpload.createdAt).toLocaleString();
+  const selectedWeeks = getWeeksInSelectedRange();
+  const selectedRosterUpload = getUploadForWeek(state.rosterHistory, state.rosterUpload, selectedWeeks[0]);
+  const selectedAttendanceUpload = getUploadForWeek(state.attendanceHistory, state.attendanceUpload, selectedWeeks[0]);
+  const createdAt = selectedRosterUpload?.createdAt ? new Date(selectedRosterUpload.createdAt).toLocaleString() : "No roster upload in selected period";
+  const attendanceCreatedAt = selectedAttendanceUpload?.createdAt ? new Date(selectedAttendanceUpload.createdAt).toLocaleString() : "No attendance upload in selected period";
   elements.recentUpload.innerHTML = `
-    <p><strong>Roster:</strong> ${escapeHtml(state.rosterUpload.label)}</p>
+    <p><strong>Selected Period:</strong> ${escapeHtml(formatDateRangeLabel(viewState.complianceStartDate, viewState.complianceEndDate))}</p>
+    <p><strong>Roster:</strong> ${escapeHtml(selectedRosterUpload?.label || "No roster upload in selected period")}</p>
     <p>Uploaded: ${createdAt}</p>
-    <p>Rows: ${state.rosterUpload.rows.length} | Issues: ${state.rosterUpload.issues.length}</p>
-    <p><strong>Attendance:</strong> ${escapeHtml(state.attendanceUpload.label)}</p>
+    <p>Rows: ${selectedRosterUpload?.rows?.length || 0} | Issues: ${selectedRosterUpload?.issues?.length || 0}</p>
+    <p><strong>Attendance:</strong> ${escapeHtml(selectedAttendanceUpload?.label || "No attendance upload in selected period")}</p>
     <p>Uploaded: ${attendanceCreatedAt}</p>
-    <p>Rows: ${state.attendanceUpload.rows.length} | Issues: ${state.attendanceUpload.issues.length}</p>
+    <p>Rows: ${selectedAttendanceUpload?.rows?.length || 0} | Issues: ${selectedAttendanceUpload?.issues?.length || 0}</p>
   `;
 }
 
@@ -892,6 +979,7 @@ function renderUploadHistory() {
             <div class="history-item">
               <div>
                 <p><strong>${escapeHtml(item.label)}</strong></p>
+                <p>${escapeHtml(formatWeekLabel(item.weekStart))}</p>
                 <p>${new Date(item.createdAt).toLocaleString()}</p>
                 <p>Rows: ${item.rowCount} | Issues: ${item.issueCount}</p>
               </div>
@@ -1696,22 +1784,28 @@ function buildComplianceRows(baselineSummary, rosterRows, attendanceRows) {
   });
 }
 
-function createRosterUpload(label, rawText, mappings, baselineRows) {
+function createRosterUpload(label, rawText, mappings, baselineRows, weekStart = getCurrentWeekStart()) {
   const rows = parseStaffingText(rawText, mappings);
+  const normalizedWeekStart = normalizeWeekStart(weekStart);
   return {
     label,
     createdAt: new Date().toISOString(),
+    weekStart: normalizedWeekStart,
+    weekLabel: formatWeekLabel(normalizedWeekStart),
     rows,
     rawText,
     issues: collectRosterIssues(rows, baselineRows),
   };
 }
 
-function createAttendanceUpload(label, rawText, mappings, baselineRows) {
+function createAttendanceUpload(label, rawText, mappings, baselineRows, weekStart = getCurrentWeekStart()) {
   const rows = parseStaffingText(rawText, mappings, { stripLeadingEmptyDay: true });
+  const normalizedWeekStart = normalizeWeekStart(weekStart);
   return {
     label,
     createdAt: new Date().toISOString(),
+    weekStart: normalizedWeekStart,
+    weekLabel: formatWeekLabel(normalizedWeekStart),
     rows,
     rawText,
     issues: collectRosterIssues(rows, baselineRows),
@@ -1724,23 +1818,17 @@ function reprocessCurrentRosterWithMappings() {
     state.rosterUpload.rawText || "",
     state.mappings,
     state.baselineRows,
+    state.rosterUpload.weekStart || getCurrentWeekStart(),
   );
   state.attendanceUpload = createAttendanceUpload(
     state.attendanceUpload.label || "Latest Attendance",
     state.attendanceUpload.rawText || "",
     state.mappings,
     state.baselineRows,
+    state.attendanceUpload.weekStart || getCurrentWeekStart(),
   );
-  state.rosterHistory = state.rosterHistory.map((item, index) =>
-    index === 0
-      ? historySnapshot(state.rosterUpload)
-      : item,
-  );
-  state.attendanceHistory = state.attendanceHistory.map((item, index) =>
-    index === 0
-      ? historySnapshot(state.attendanceUpload)
-      : item,
-  );
+  upsertUploadHistory("roster", state.rosterUpload);
+  upsertUploadHistory("attendance", state.attendanceUpload);
 }
 
 function parseStaffingText(rawText, mappings, options = {}) {
@@ -1887,10 +1975,258 @@ function historySnapshot(upload) {
   return {
     label: upload.label,
     createdAt: upload.createdAt,
+    weekStart: upload.weekStart,
+    weekLabel: upload.weekLabel,
     rowCount: upload.rows.length,
     issueCount: upload.issues.length,
     rawText: upload.rawText,
+    rows: upload.rows,
+    issues: upload.issues,
   };
+}
+
+function normalizeUploadHistory(history, fallbackUpload, kind, mappings, baselineRows) {
+  const source = Array.isArray(history) && history.length ? history : [historySnapshot(fallbackUpload)];
+  return source
+    .map((item) => normalizeUploadSnapshot(item, kind, mappings, baselineRows))
+    .sort((left, right) => String(right.weekStart).localeCompare(String(left.weekStart)));
+}
+
+function normalizeUploadSnapshot(item, kind, mappings, baselineRows) {
+  if (item?.rows && item?.issues && item?.weekStart) {
+    return {
+      ...item,
+      weekStart: normalizeWeekStart(item.weekStart),
+      weekLabel: formatWeekLabel(item.weekStart),
+      rowCount: item.rows.length,
+      issueCount: item.issues.length,
+    };
+  }
+
+  const upload = kind === "attendance"
+    ? createAttendanceUpload(item?.label || "Attendance", item?.rawText || "", mappings, baselineRows, item?.weekStart || getCurrentWeekStart())
+    : createRosterUpload(item?.label || "Roster", item?.rawText || "", mappings, baselineRows, item?.weekStart || getCurrentWeekStart());
+  return historySnapshot(upload);
+}
+
+function upsertUploadHistory(kind, upload) {
+  const key = kind === "attendance" ? "attendanceHistory" : "rosterHistory";
+  const snapshot = historySnapshot(upload);
+  const filtered = state[key].filter((item) => item.weekStart !== snapshot.weekStart);
+  state[key] = [snapshot, ...filtered].sort((left, right) => String(right.weekStart).localeCompare(String(left.weekStart))).slice(0, 16);
+}
+
+function getAvailableWeekOptions() {
+  const weeks = new Set([
+    state.rosterUpload.weekStart,
+    state.attendanceUpload.weekStart,
+    ...state.rosterHistory.map((item) => item.weekStart),
+    ...state.attendanceHistory.map((item) => item.weekStart),
+  ].filter(Boolean));
+  return [...weeks]
+    .sort((left, right) => String(right).localeCompare(String(left)))
+    .map((weekStart) => ({ value: weekStart, label: formatWeekLabel(weekStart) }));
+}
+
+function initializeComplianceRange() {
+  if (!viewState.complianceStartDate || !viewState.complianceEndDate) {
+    const latest = getAvailableWeekOptions()[0];
+    setComplianceRangeFromWeek(latest?.value || getCurrentWeekStart());
+  }
+}
+
+function getUploadForWeek(history, fallbackUpload, weekStart) {
+  const normalizedWeekStart = normalizeWeekStart(weekStart);
+  return history.find((item) => item.weekStart === normalizedWeekStart)
+    || (fallbackUpload?.weekStart === normalizedWeekStart ? fallbackUpload : null);
+}
+
+function setComplianceRangeFromWeek(weekStart) {
+  const normalized = normalizeWeekStart(weekStart);
+  viewState.complianceRangeType = "7";
+  viewState.complianceStartDate = normalized;
+  viewState.complianceEndDate = shiftDate(normalized, 6);
+}
+
+function syncComplianceDateRangeInputs() {
+  if (!viewState.complianceStartDate) {
+    viewState.complianceStartDate = getCurrentWeekStart();
+  }
+  const bounds = getAvailableDateBounds();
+  if (bounds) {
+    if (viewState.complianceStartDate < bounds.min) {
+      viewState.complianceStartDate = bounds.min;
+    }
+    if (viewState.complianceStartDate > bounds.max) {
+      viewState.complianceStartDate = bounds.max;
+    }
+  }
+  if (viewState.complianceRangeType === "7") {
+    viewState.complianceEndDate = shiftDate(viewState.complianceStartDate, 6);
+  } else if (viewState.complianceRangeType === "14") {
+    viewState.complianceEndDate = shiftDate(viewState.complianceStartDate, 13);
+  } else {
+    if (!viewState.complianceEndDate || viewState.complianceEndDate < viewState.complianceStartDate) {
+      viewState.complianceEndDate = viewState.complianceStartDate;
+    }
+  }
+  if (bounds) {
+    if (viewState.complianceEndDate > bounds.max) {
+      viewState.complianceEndDate = bounds.max;
+    }
+    if (viewState.complianceEndDate < bounds.min) {
+      viewState.complianceEndDate = bounds.min;
+    }
+    if (viewState.complianceEndDate < viewState.complianceStartDate) {
+      viewState.complianceEndDate = viewState.complianceStartDate;
+    }
+    elements.complianceStartDate.min = bounds.min;
+    elements.complianceStartDate.max = bounds.max;
+    elements.complianceEndDate.min = bounds.min;
+    elements.complianceEndDate.max = bounds.max;
+  }
+  elements.complianceRangeType.value = viewState.complianceRangeType;
+  elements.complianceStartDate.value = viewState.complianceStartDate;
+  elements.complianceEndDate.value = viewState.complianceEndDate;
+  elements.complianceEndDate.disabled = viewState.complianceRangeType !== "custom";
+}
+
+function getSelectedDateRange() {
+  const start = new Date(`${normalizeDateInput(viewState.complianceStartDate)}T00:00:00`);
+  const end = new Date(`${normalizeDateInput(viewState.complianceEndDate)}T00:00:00`);
+  const availableWeeks = new Set(getAvailableWeekOptions().map((option) => option.value));
+  const dates = [];
+  for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    const dateKey = toDateInputValue(cursor);
+    if (!availableWeeks.has(normalizeWeekStart(dateKey))) continue;
+    dates.push({
+      dateKey,
+      dayKey: DAYS[cursor.getDay()],
+    });
+  }
+  return dates;
+}
+
+function getWeeksInSelectedRange() {
+  return [...new Set(getSelectedDateRange().map((item) => normalizeWeekStart(item.dateKey)))];
+}
+
+function shiftDate(dateValue, offsetDays) {
+  const date = new Date(`${normalizeDateInput(dateValue)}T00:00:00`);
+  date.setDate(date.getDate() + offsetDays);
+  return toDateInputValue(date);
+}
+
+function normalizeDateInput(value) {
+  return String(value || "").slice(0, 10) || getCurrentWeekStart();
+}
+
+function getAvailableDateBounds() {
+  const weeks = getAvailableWeekOptions().map((option) => option.value);
+  if (!weeks.length) return null;
+  const earliestWeek = weeks[weeks.length - 1];
+  const latestWeek = weeks[0];
+  return {
+    min: earliestWeek,
+    max: shiftDate(latestWeek, 6),
+  };
+}
+
+function buildComplianceRowsForSelectedPeriod(baselineSummary) {
+  const selectedDates = getSelectedDateRange();
+  const rosterUploads = new Map(state.rosterHistory.map((item) => [item.weekStart, item]));
+  const attendanceUploads = new Map(state.attendanceHistory.map((item) => [item.weekStart, item]));
+  const summaryBySubDepartment = new Map();
+
+  const ensureEntry = (baselineEntry) => {
+    const key = `${normalizeName(baselineEntry.mainDepartment)}|||${normalizeName(baselineEntry.subDepartment)}`;
+    if (!summaryBySubDepartment.has(key)) {
+      summaryBySubDepartment.set(key, {
+        mainDepartment: baselineEntry.mainDepartment,
+        subDepartment: baselineEntry.subDepartment,
+        budgetHeadcount: baselineEntry.budgetHeadcount,
+        requiredFte: baselineEntry.requiredFte,
+        baselineByDay: Object.fromEntries(DAYS.map((day) => [day, 0])),
+        actualByDay: Object.fromEntries(DAYS.map((day) => [day, 0])),
+        attendanceByDay: Object.fromEntries(DAYS.map((day) => [day, 0])),
+      });
+    }
+    return summaryBySubDepartment.get(key);
+  };
+
+  selectedDates.forEach(({ dateKey, dayKey }) => {
+    const weekStart = normalizeWeekStart(dateKey);
+    const rosterUpload = rosterUploads.get(weekStart) || (state.rosterUpload.weekStart === weekStart ? state.rosterUpload : null);
+    const attendanceUpload = attendanceUploads.get(weekStart) || (state.attendanceUpload.weekStart === weekStart ? state.attendanceUpload : null);
+    const rosterRows = rosterUpload?.rows || [];
+    const attendanceRows = attendanceUpload?.rows || [];
+
+    baselineSummary.forEach((baselineEntry) => {
+      const entry = ensureEntry(baselineEntry);
+      entry.baselineByDay[dayKey] += Number(baselineEntry.baselineByDay[dayKey] || 0);
+      entry.actualByDay[dayKey] += rosterRows.filter(
+        (row) => normalizeName(row.mappedSubDepartment) === normalizeName(baselineEntry.subDepartment) && countsAsWorking(row[dayKey]),
+      ).length;
+      entry.attendanceByDay[dayKey] += attendanceRows.filter(
+        (row) => normalizeName(row.mappedSubDepartment) === normalizeName(baselineEntry.subDepartment) && countsAsWorking(row[dayKey]),
+      ).length;
+    });
+  });
+
+  return Array.from(summaryBySubDepartment.values()).map((entry) => {
+    const baselineVarianceByDay = {};
+    const rosterAttendanceVarianceByDay = {};
+    DAYS.forEach((day) => {
+      baselineVarianceByDay[day] = entry.actualByDay[day] - entry.baselineByDay[day];
+      rosterAttendanceVarianceByDay[day] = entry.attendanceByDay[day] - entry.actualByDay[day];
+    });
+    return {
+      ...entry,
+      summaryByDay: entry.baselineByDay,
+      baselineVarianceByDay,
+      rosterAttendanceVarianceByDay,
+      weeklyVariance: sumDayMap(baselineVarianceByDay),
+      weeklyBaseline: sumDayMap(entry.baselineByDay),
+      weeklySummaryTotal: sumDayMap(entry.baselineByDay),
+      weeklyActual: sumDayMap(entry.actualByDay),
+      weeklyAttendance: sumDayMap(entry.attendanceByDay),
+      weeklyBaselineVariance: sumDayMap(baselineVarianceByDay),
+      weeklyRosterAttendanceVariance: sumDayMap(rosterAttendanceVarianceByDay),
+    };
+  });
+}
+
+function normalizeWeekStart(value) {
+  if (!value) return getCurrentWeekStart();
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  const start = new Date(date);
+  start.setDate(date.getDate() - date.getDay());
+  return toDateInputValue(start);
+}
+
+function getCurrentWeekStart() {
+  return normalizeWeekStart(toDateInputValue(new Date()));
+}
+
+function toDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatWeekLabel(weekStart) {
+  const normalized = normalizeWeekStart(weekStart);
+  const start = new Date(`${normalized}T00:00:00`);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return `${start.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })} to ${end.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
+function formatDateRangeLabel(startDate, endDate) {
+  const start = new Date(`${normalizeDateInput(startDate)}T00:00:00`);
+  const end = new Date(`${normalizeDateInput(endDate)}T00:00:00`);
+  return `${start.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })} to ${end.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
 }
 
 function loadBaselineRowIntoForm(rowId) {

@@ -312,6 +312,10 @@
                   Upload Label
                   <input name="uploadLabel" value="Week 1 Demo" required />
                 </label>
+                <label>
+                  Week Starting
+                  <input name="weekStart" type="date" required />
+                </label>
                 <label class="full-span">
                   Paste tab-separated rows with columns:
                   <code>ID Name Department Sun Mon Tue Wed Thu Fri Sat</code>
@@ -383,6 +387,10 @@
                   Upload Label
                   <input name="uploadLabel" value="Attendance Demo" required />
                 </label>
+                <label>
+                  Week Starting
+                  <input name="weekStart" type="date" required />
+                </label>
                 <label class="full-span">
                   Paste tab-separated attendance rows with columns:
                   <code>ID Name Department Sun Mon Tue Wed Thu Fri Sat</code>
@@ -451,6 +459,22 @@
             <div class="panel-header">
               <h3>Compliance Result</h3>
               <div class="actions-cell">
+                <label>
+                  <span class="caption">Range Type</span>
+                  <select id="compliance-range-type">
+                    <option value="7">1 Week</option>
+                    <option value="14">2 Weeks</option>
+                    <option value="custom">Custom Range</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="caption">Start Date</span>
+                  <input id="compliance-start-date" type="date" />
+                </label>
+                <label>
+                  <span class="caption">End Date</span>
+                  <input id="compliance-end-date" type="date" />
+                </label>
                 <label>
                   <span class="caption">Department Filter</span>
                   <select id="compliance-department-filter"></select>
