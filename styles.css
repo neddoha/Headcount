@@ -917,10 +917,6 @@ th {
   padding-inline: 6px;
 }
 
-tr.is-editing {
-  background: rgba(195, 119, 73, 0.08);
-}
-
 .history-list,
 .suggestion-list {
   display: grid;

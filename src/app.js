@@ -101,7 +101,6 @@ const viewState = {
   attendanceSubDepartment: "all",
   blankDepartment: "all",
   blankSubDepartment: "all",
-  baselineEditingRowId: "",
   rosterSearch: "",
   attendanceSearch: "",
 };
@@ -601,25 +600,16 @@ function bindEvents() {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
     const rowId = button.dataset.id;
-    if (button.dataset.action === "edit-baseline-inline") {
-      viewState.baselineEditingRowId = rowId;
-      renderBaselineTable();
-      return;
-    }
     if (button.dataset.action === "save-baseline-inline") {
       const tableRow = button.closest("tr[data-row-id]");
       if (!tableRow) return;
       updateBaselineRowFromTable(tableRow);
-      viewState.baselineEditingRowId = "";
       await saveState();
       render();
       return;
     }
     if (button.dataset.action === "delete-baseline") {
       state.baselineRows = state.baselineRows.filter((row) => row.id !== rowId);
-      if (viewState.baselineEditingRowId === rowId) {
-        viewState.baselineEditingRowId = "";
-      }
       await saveState();
       render();
     }
@@ -927,17 +917,16 @@ function renderBaselineTable() {
     const weeklyTotal = row.rowType === "summary" && liveSummary
       ? liveSummary.weeklyBaseline
       : row.weeklyTotal ?? DAYS.reduce((sum, day) => sum + Number(row[day] || 0), 0);
-    const isEditingRow = viewState.baselineEditingRowId === row.id;
     const actions = isAdmin()
       ? row.rowType === "summary"
         ? `<span class="status-chip status-warn">Auto total</span>`
         : `
-            <button class="inline-button" type="button" data-action="${isEditingRow ? "save-baseline-inline" : "edit-baseline-inline"}" data-id="${row.id}">${isEditingRow ? "Save" : "Edit"}</button>
+            <button class="inline-button" type="button" data-action="save-baseline-inline" data-id="${row.id}">Save</button>
             <button class="danger-button" type="button" data-action="delete-baseline" data-id="${row.id}">Delete</button>
           `
       : `<span class="status-chip status-warn">View only</span>`;
 
-    const editableCells = row.rowType !== "summary" && isAdmin() && isEditingRow;
+    const editableCells = row.rowType !== "summary" && isAdmin();
     const dayInputs = DAYS.map((day) => editableCells
       ? `<td><input class="table-input table-input-day" type="number" min="0" step="1" data-field="${day}" value="${Number(row[day] || 0)}"></td>`
       : `<td>${displayDayValues[day]}</td>`)
@@ -975,7 +964,7 @@ function renderBaselineTable() {
     }
 
     markup.push(`
-        <tr class="${row.rowType === "summary" ? "summary-row" : ""} ${isEditingRow ? "is-editing" : ""}" data-row-id="${row.id}">
+        <tr class="${row.rowType === "summary" ? "summary-row" : ""}" data-row-id="${row.id}">
           ${mainDepartmentCell}
           ${subDepartmentCell}
           ${shiftCell}
