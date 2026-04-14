@@ -90,6 +90,7 @@ const authState = {
 
 let currentUser = await initializeSession();
 const state = await initializeState();
+let lastSyncedStateSignature = createStateSignature(state);
 const viewState = {
   baselineDepartment: "all",
   complianceDepartment: "all",
@@ -108,6 +109,7 @@ const viewState = {
 seedForms();
 bindEvents();
 render();
+startServerSync();
 
 async function initializeState() {
   const localState = loadStateFromLocal();
@@ -316,7 +318,39 @@ async function saveState() {
   localStorage.setItem(storageKeys.rosterHistory, JSON.stringify(state.rosterHistory));
   localStorage.setItem(storageKeys.attendanceUpload, JSON.stringify(state.attendanceUpload));
   localStorage.setItem(storageKeys.attendanceHistory, JSON.stringify(state.attendanceHistory));
+  lastSyncedStateSignature = createStateSignature(state);
   return await persistStateToApi();
+}
+
+function startServerSync() {
+  setInterval(async () => {
+    if (!currentUser || isUserEditingInput()) return;
+    const remoteState = await loadStateFromApi();
+    if (!remoteState) return;
+    const remoteSignature = createStateSignature(remoteState);
+    if (remoteSignature === lastSyncedStateSignature) return;
+    applyLoadedState(remoteState);
+    lastSyncedStateSignature = createStateSignature(state);
+    render();
+  }, 12000);
+}
+
+function isUserEditingInput() {
+  const activeElement = document.activeElement;
+  if (!activeElement) return false;
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(activeElement.tagName);
+}
+
+function createStateSignature(source) {
+  return JSON.stringify({
+    baselineRows: source.baselineRows || [],
+    mappings: source.mappings || [],
+    settings: source.settings || {},
+    rosterUpload: source.rosterUpload || {},
+    rosterHistory: source.rosterHistory || [],
+    attendanceUpload: source.attendanceUpload || {},
+    attendanceHistory: source.attendanceHistory || [],
+  });
 }
 
 function seedForms() {
