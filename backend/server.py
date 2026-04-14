@@ -13,6 +13,13 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:  # pragma: no cover - optional dependency for local sqlite fallback
+    psycopg = None
+    dict_row = None
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "backend"))
@@ -22,6 +29,8 @@ SESSION_COOKIE_NAME = os.environ.get("SESSION_COOKIE_NAME", "shift_headcount_ses
 APP_ENV = os.environ.get("APP_ENV", "development").lower()
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true" if APP_ENV == "production" else "false").lower() == "true"
 AUTH_DISABLED = os.environ.get("AUTH_DISABLED", "true" if APP_ENV == "development" else "false").lower() == "true"
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+USING_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 DEFAULT_DB_DIR = (
     Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "shift-headcount-app"
     if APP_ENV == "development"
@@ -57,6 +66,11 @@ def ensure_state_store() -> None:
 
 def get_db_connection() -> sqlite3.Connection:
     global ACTIVE_DB_PATH
+    if USING_POSTGRES:
+        if psycopg is None:
+            raise RuntimeError("psycopg is required when DATABASE_URL is configured.")
+        connection = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        return connection
     ensure_state_store()
     try:
         ACTIVE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -70,71 +84,74 @@ def get_db_connection() -> sqlite3.Connection:
 
 def ensure_database() -> None:
     with get_db_connection() as connection:
-      connection.executescript(
-          """
-          CREATE TABLE IF NOT EXISTS app_settings (
-              id INTEGER PRIMARY KEY CHECK (id = 1),
-              weeks_in_year INTEGER NOT NULL,
-              annual_days INTEGER NOT NULL,
-              days_off INTEGER NOT NULL,
-              public_holidays INTEGER NOT NULL
-          );
+        schema_sql = """
+        CREATE TABLE IF NOT EXISTS app_settings (
+            id INTEGER PRIMARY KEY,
+            weeks_in_year INTEGER NOT NULL,
+            annual_days INTEGER NOT NULL,
+            days_off INTEGER NOT NULL,
+            public_holidays INTEGER NOT NULL
+        );
 
-          CREATE TABLE IF NOT EXISTS baseline_rows (
-              id TEXT PRIMARY KEY,
-              main_department TEXT NOT NULL,
-              sub_department TEXT NOT NULL,
-              shift_name TEXT NOT NULL,
-              position_name TEXT NOT NULL,
-              row_type TEXT NOT NULL DEFAULT 'shift',
-              required_fte TEXT NOT NULL DEFAULT '',
-              budget_headcount TEXT NOT NULL DEFAULT '',
-              sun INTEGER NOT NULL DEFAULT 0,
-              mon INTEGER NOT NULL DEFAULT 0,
-              tue INTEGER NOT NULL DEFAULT 0,
-              wed INTEGER NOT NULL DEFAULT 0,
-              thu INTEGER NOT NULL DEFAULT 0,
-              fri INTEGER NOT NULL DEFAULT 0,
-              sat INTEGER NOT NULL DEFAULT 0,
-              weekly_total INTEGER NOT NULL DEFAULT 0
-          );
+        CREATE TABLE IF NOT EXISTS baseline_rows (
+            id TEXT PRIMARY KEY,
+            main_department TEXT NOT NULL,
+            sub_department TEXT NOT NULL,
+            shift_name TEXT NOT NULL,
+            position_name TEXT NOT NULL,
+            row_type TEXT NOT NULL DEFAULT 'shift',
+            required_fte TEXT NOT NULL DEFAULT '',
+            budget_headcount TEXT NOT NULL DEFAULT '',
+            sun INTEGER NOT NULL DEFAULT 0,
+            mon INTEGER NOT NULL DEFAULT 0,
+            tue INTEGER NOT NULL DEFAULT 0,
+            wed INTEGER NOT NULL DEFAULT 0,
+            thu INTEGER NOT NULL DEFAULT 0,
+            fri INTEGER NOT NULL DEFAULT 0,
+            sat INTEGER NOT NULL DEFAULT 0,
+            weekly_total INTEGER NOT NULL DEFAULT 0
+        );
 
-          CREATE TABLE IF NOT EXISTS department_mappings (
-              id TEXT PRIMARY KEY,
-              source_name TEXT NOT NULL,
-              target_name TEXT NOT NULL
-          );
+        CREATE TABLE IF NOT EXISTS department_mappings (
+            id TEXT PRIMARY KEY,
+            source_name TEXT NOT NULL,
+            target_name TEXT NOT NULL
+        );
 
-          CREATE TABLE IF NOT EXISTS roster_uploads (
-              week_start TEXT PRIMARY KEY,
-              label TEXT NOT NULL,
-              week_label TEXT NOT NULL DEFAULT '',
-              created_at TEXT NOT NULL,
-              raw_text TEXT NOT NULL DEFAULT '',
-              rows_json TEXT NOT NULL DEFAULT '[]',
-              issues_json TEXT NOT NULL DEFAULT '[]',
-              row_count INTEGER NOT NULL DEFAULT 0,
-              issue_count INTEGER NOT NULL DEFAULT 0
-          );
+        CREATE TABLE IF NOT EXISTS roster_uploads (
+            week_start TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            week_label TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            raw_text TEXT NOT NULL DEFAULT '',
+            rows_json TEXT NOT NULL DEFAULT '[]',
+            issues_json TEXT NOT NULL DEFAULT '[]',
+            row_count INTEGER NOT NULL DEFAULT 0,
+            issue_count INTEGER NOT NULL DEFAULT 0
+        );
 
-          CREATE TABLE IF NOT EXISTS attendance_uploads (
-              week_start TEXT PRIMARY KEY,
-              label TEXT NOT NULL,
-              week_label TEXT NOT NULL DEFAULT '',
-              created_at TEXT NOT NULL,
-              raw_text TEXT NOT NULL DEFAULT '',
-              rows_json TEXT NOT NULL DEFAULT '[]',
-              issues_json TEXT NOT NULL DEFAULT '[]',
-              row_count INTEGER NOT NULL DEFAULT 0,
-              issue_count INTEGER NOT NULL DEFAULT 0
-          );
+        CREATE TABLE IF NOT EXISTS attendance_uploads (
+            week_start TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            week_label TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            raw_text TEXT NOT NULL DEFAULT '',
+            rows_json TEXT NOT NULL DEFAULT '[]',
+            issues_json TEXT NOT NULL DEFAULT '[]',
+            row_count INTEGER NOT NULL DEFAULT 0,
+            issue_count INTEGER NOT NULL DEFAULT 0
+        );
 
-          CREATE TABLE IF NOT EXISTS app_meta (
-              key TEXT PRIMARY KEY,
-              value TEXT NOT NULL
-          );
-          """
-      )
+        CREATE TABLE IF NOT EXISTS app_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        """
+        if USING_POSTGRES:
+            connection.execute(schema_sql)
+            connection.commit()
+        else:
+            connection.executescript(schema_sql)
 
 
 def read_json_file(path: Path) -> dict | None:
@@ -229,13 +246,23 @@ def write_state(payload: dict) -> None:
     with get_db_connection() as connection:
         connection.execute("DELETE FROM baseline_rows")
         for row in payload.get("baselineRows", []):
-            connection.execute(
+            query = (
                 """
                 INSERT INTO baseline_rows (
                     id, main_department, sub_department, shift_name, position_name,
                     row_type, required_fte, budget_headcount, sun, mon, tue, wed, thu, fri, sat, weekly_total
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                if USING_POSTGRES
+                else """
+                INSERT INTO baseline_rows (
+                    id, main_department, sub_department, shift_name, position_name,
+                    row_type, required_fte, budget_headcount, sun, mon, tue, wed, thu, fri, sat, weekly_total
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
+            )
+            connection.execute(
+                query,
                 (
                     row.get("id", ""),
                     row.get("mainDepartment", ""),
@@ -258,14 +285,26 @@ def write_state(payload: dict) -> None:
 
         connection.execute("DELETE FROM department_mappings")
         for row in payload.get("mappings", []):
-            connection.execute(
-                "INSERT INTO department_mappings (id, source_name, target_name) VALUES (?, ?, ?)",
-                (row.get("id", ""), row.get("sourceName", ""), row.get("targetName", "")),
+            query = (
+                "INSERT INTO department_mappings (id, source_name, target_name) VALUES (%s, %s, %s)"
+                if USING_POSTGRES
+                else "INSERT INTO department_mappings (id, source_name, target_name) VALUES (?, ?, ?)"
             )
+            connection.execute(query, (row.get("id", ""), row.get("sourceName", ""), row.get("targetName", "")))
 
         settings = payload.get("settings", {})
-        connection.execute(
+        settings_query = (
             """
+            INSERT INTO app_settings (id, weeks_in_year, annual_days, days_off, public_holidays)
+            VALUES (1, %s, %s, %s, %s)
+            ON CONFLICT(id) DO UPDATE SET
+                weeks_in_year = excluded.weeks_in_year,
+                annual_days = excluded.annual_days,
+                days_off = excluded.days_off,
+                public_holidays = excluded.public_holidays
+            """
+            if USING_POSTGRES
+            else """
             INSERT INTO app_settings (id, weeks_in_year, annual_days, days_off, public_holidays)
             VALUES (1, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
@@ -273,7 +312,10 @@ def write_state(payload: dict) -> None:
                 annual_days = excluded.annual_days,
                 days_off = excluded.days_off,
                 public_holidays = excluded.public_holidays
-            """,
+            """
+        )
+        connection.execute(
+            settings_query,
             (
                 int(settings.get("weeksInYear", 52) or 52),
                 int(settings.get("annualDays", 365) or 365),
@@ -327,13 +369,23 @@ def save_upload_table(
 
     connection.execute(f"DELETE FROM {table_name}")
     for week_start, item in sorted(uploads.items(), reverse=True):
-        connection.execute(
+        query = (
             f"""
             INSERT INTO {table_name} (
                 week_start, label, week_label, created_at, raw_text,
                 rows_json, issues_json, row_count, issue_count
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            if USING_POSTGRES
+            else f"""
+            INSERT INTO {table_name} (
+                week_start, label, week_label, created_at, raw_text,
+                rows_json, issues_json, row_count, issue_count
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+            """
+        )
+        connection.execute(
+            query,
             (
                 week_start,
                 item.get("label", ""),
@@ -365,18 +417,24 @@ def normalize_upload_snapshot(item: dict) -> dict:
 
 
 def read_meta_value(connection: sqlite3.Connection, key: str) -> str:
-    row = connection.execute("SELECT value FROM app_meta WHERE key = ?", (key,)).fetchone()
+    query = "SELECT value FROM app_meta WHERE key = %s" if USING_POSTGRES else "SELECT value FROM app_meta WHERE key = ?"
+    row = connection.execute(query, (key,)).fetchone()
     return row["value"] if row else ""
 
 
 def write_meta_value(connection: sqlite3.Connection, key: str, value: str) -> None:
-    connection.execute(
+    query = (
         """
+        INSERT INTO app_meta (key, value) VALUES (%s, %s)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
+        if USING_POSTGRES
+        else """
         INSERT INTO app_meta (key, value) VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        """,
-        (key, value or ""),
+        """
     )
+    connection.execute(query, (key, value or ""))
 
 
 def read_state_version() -> int:
@@ -471,7 +529,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     "status": "ok",
                     "environment": APP_ENV,
                     "cookieSecure": COOKIE_SECURE,
-                    "storage": "sqlite",
+                    "storage": "postgres" if USING_POSTGRES else "sqlite",
                     "authDisabled": AUTH_DISABLED,
                 }
             )
@@ -680,7 +738,8 @@ def main() -> None:
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "4173"))
     server = ThreadingHTTPServer((host, port), AppHandler)
-    print(f"Serving Shift Headcount app at http://{host}:{port} using database {ACTIVE_DB_PATH}")
+    database_label = DATABASE_URL if USING_POSTGRES else str(ACTIVE_DB_PATH)
+    print(f"Serving Shift Headcount app at http://{host}:{port} using database {database_label}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

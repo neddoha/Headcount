@@ -10,6 +10,8 @@ services:
         value: 3.14.3
       - key: APP_ENV
         value: production
+      - key: AUTH_DISABLED
+        value: "false"
       - key: COOKIE_SECURE
         value: "true"
       - key: SESSION_COOKIE_NAME
