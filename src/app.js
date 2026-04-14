@@ -101,6 +101,7 @@ const viewState = {
   attendanceSubDepartment: "all",
   blankDepartment: "all",
   blankSubDepartment: "all",
+  baselineEditingRowId: "",
   rosterSearch: "",
   attendanceSearch: "",
 };
@@ -595,15 +596,31 @@ function bindEvents() {
     activateView("compliance");
   });
 
-  elements.baselineTable.addEventListener("click", (event) => {
+  elements.baselineTable.addEventListener("click", async (event) => {
     if (!isAdmin()) return;
     const button = event.target.closest("button[data-action]");
     if (!button) return;
     const rowId = button.dataset.id;
-    if (button.dataset.action === "edit-baseline") loadBaselineRowIntoForm(rowId);
+    if (button.dataset.action === "edit-baseline-inline") {
+      viewState.baselineEditingRowId = rowId;
+      renderBaselineTable();
+      return;
+    }
+    if (button.dataset.action === "save-baseline-inline") {
+      const tableRow = button.closest("tr[data-row-id]");
+      if (!tableRow) return;
+      updateBaselineRowFromTable(tableRow);
+      viewState.baselineEditingRowId = "";
+      await saveState();
+      render();
+      return;
+    }
     if (button.dataset.action === "delete-baseline") {
       state.baselineRows = state.baselineRows.filter((row) => row.id !== rowId);
-      saveState();
+      if (viewState.baselineEditingRowId === rowId) {
+        viewState.baselineEditingRowId = "";
+      }
+      await saveState();
       render();
     }
   });
@@ -910,12 +927,33 @@ function renderBaselineTable() {
     const weeklyTotal = row.rowType === "summary" && liveSummary
       ? liveSummary.weeklyBaseline
       : row.weeklyTotal ?? DAYS.reduce((sum, day) => sum + Number(row[day] || 0), 0);
+    const isEditingRow = viewState.baselineEditingRowId === row.id;
     const actions = isAdmin()
-      ? `
-            <button class="inline-button" type="button" data-action="edit-baseline" data-id="${row.id}">Edit</button>
-          <button class="danger-button" type="button" data-action="delete-baseline" data-id="${row.id}">Delete</button>
-        `
+      ? row.rowType === "summary"
+        ? `<span class="status-chip status-warn">Auto total</span>`
+        : `
+            <button class="inline-button" type="button" data-action="${isEditingRow ? "save-baseline-inline" : "edit-baseline-inline"}" data-id="${row.id}">${isEditingRow ? "Save" : "Edit"}</button>
+            <button class="danger-button" type="button" data-action="delete-baseline" data-id="${row.id}">Delete</button>
+          `
       : `<span class="status-chip status-warn">View only</span>`;
+
+    const editableCells = row.rowType !== "summary" && isAdmin() && isEditingRow;
+    const dayInputs = DAYS.map((day) => editableCells
+      ? `<td><input class="table-input table-input-day" type="number" min="0" step="1" data-field="${day}" value="${Number(row[day] || 0)}"></td>`
+      : `<td>${displayDayValues[day]}</td>`)
+      .join("");
+    const mainDepartmentCell = editableCells
+      ? `<td><input class="table-input" type="text" data-field="mainDepartment" value="${escapeHtml(row.mainDepartment)}"></td>`
+      : `<td>${escapeHtml(row.mainDepartment)}</td>`;
+    const subDepartmentCell = editableCells
+      ? `<td><input class="table-input" type="text" data-field="subDepartment" value="${escapeHtml(row.subDepartment)}"></td>`
+      : `<td>${escapeHtml(row.subDepartment)}</td>`;
+    const shiftCell = editableCells
+      ? `<td><input class="table-input" type="text" data-field="shiftName" value="${escapeHtml(row.shiftName)}"></td>`
+      : `<td>${escapeHtml(row.shiftName)}</td>`;
+    const positionCell = editableCells
+      ? `<td><input class="table-input" type="text" data-field="positionName" value="${escapeHtml(row.positionName)}"></td>`
+      : `<td>${escapeHtml(row.rowType === "summary" ? `FTE ${row.requiredFte || ""}`.trim() : row.positionName)}</td>`;
 
     if (row.mainDepartment !== currentDepartment) {
       currentDepartment = row.mainDepartment;
@@ -937,12 +975,12 @@ function renderBaselineTable() {
     }
 
     markup.push(`
-        <tr class="${row.rowType === "summary" ? "summary-row" : ""}">
-          <td>${escapeHtml(row.mainDepartment)}</td>
-          <td>${escapeHtml(row.subDepartment)}</td>
-          <td>${escapeHtml(row.shiftName)}</td>
-          <td>${escapeHtml(row.rowType === "summary" ? `FTE ${row.requiredFte || ""}`.trim() : row.positionName)}</td>
-          ${DAYS.map((day) => `<td>${displayDayValues[day]}</td>`).join("")}
+        <tr class="${row.rowType === "summary" ? "summary-row" : ""} ${isEditingRow ? "is-editing" : ""}" data-row-id="${row.id}">
+          ${mainDepartmentCell}
+          ${subDepartmentCell}
+          ${shiftCell}
+          ${positionCell}
+          ${dayInputs}
           <td>${weeklyTotal}</td>
           <td class="actions-cell">${actions}</td>
         </tr>
@@ -1844,6 +1882,41 @@ function loadBaselineRowIntoForm(rowId) {
     elements.baselineForm.elements[day].value = row[day];
   });
   activateView("baseline");
+}
+
+function updateBaselineRowFromTable(tableRow) {
+  const rowId = tableRow.dataset.rowId;
+  if (!rowId) return;
+  state.baselineRows = state.baselineRows.map((row) => {
+    if (row.id !== rowId || row.rowType === "summary") return row;
+
+    const updatedRow = {
+      ...row,
+      mainDepartment: readTableInputValue(tableRow, "mainDepartment", row.mainDepartment),
+      subDepartment: readTableInputValue(tableRow, "subDepartment", row.subDepartment),
+      shiftName: readTableInputValue(tableRow, "shiftName", row.shiftName),
+      positionName: readTableInputValue(tableRow, "positionName", row.positionName),
+    };
+
+    DAYS.forEach((day) => {
+      updatedRow[day] = clampNonNegativeInteger(readTableInputValue(tableRow, day, row[day]));
+    });
+
+    updatedRow.weeklyTotal = DAYS.reduce((sum, day) => sum + Number(updatedRow[day] || 0), 0);
+    return updatedRow;
+  });
+}
+
+function readTableInputValue(tableRow, fieldName, fallbackValue = "") {
+  const input = tableRow.querySelector(`[data-field="${fieldName}"]`);
+  if (!input) return fallbackValue;
+  return String(input.value || fallbackValue).trim();
+}
+
+function clampNonNegativeInteger(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.round(parsed);
 }
 
 function loadMappingIntoForm(mappingId) {

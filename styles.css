@@ -900,6 +900,27 @@ th {
   flex-wrap: wrap;
 }
 
+.table-input {
+  width: 100%;
+  min-width: 120px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(17, 17, 17, 0.12);
+  background: #ffffff;
+  color: #111111;
+  font: inherit;
+}
+
+.table-input-day {
+  min-width: 58px;
+  text-align: center;
+  padding-inline: 6px;
+}
+
+tr.is-editing {
+  background: rgba(195, 119, 73, 0.08);
+}
+
 .history-list,
 .suggestion-list {
   display: grid;
