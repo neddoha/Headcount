@@ -67,6 +67,7 @@ const elements = {
   complianceRangeType: document.querySelector("#compliance-range-type"),
   complianceStartDate: document.querySelector("#compliance-start-date"),
   complianceEndDate: document.querySelector("#compliance-end-date"),
+  compliancePeriodLabel: document.querySelector("#compliance-period-label"),
   complianceDepartmentFilter: document.querySelector("#compliance-department-filter"),
   complianceTable: document.querySelector("#compliance-table"),
   reportsTypeFilter: document.querySelector("#reports-type-filter"),
@@ -334,10 +335,18 @@ async function saveState() {
 
 function startServerSync() {
   startLiveUpdates();
+  window.addEventListener("focus", () => {
+    refreshStateFromServer();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      refreshStateFromServer();
+    }
+  });
   setInterval(async () => {
     if (!currentUser || isUserEditingInput()) return;
     await refreshStateFromServer();
-  }, 12000);
+  }, 5000);
 }
 
 function startLiveUpdates() {
@@ -813,8 +822,16 @@ function render() {
   renderAttendanceTable();
   renderAttendanceValidation();
   renderBlankRosterCheck();
+  renderCompliancePeriodLabel();
   renderComplianceTable(complianceSummary);
   renderReports(complianceSummary);
+}
+
+function renderCompliancePeriodLabel() {
+  if (!elements.compliancePeriodLabel) return;
+  elements.compliancePeriodLabel.innerHTML = `
+    <strong>Selected Period:</strong> ${escapeHtml(formatDateRangeLabel(viewState.complianceStartDate, viewState.complianceEndDate))}
+  `;
 }
 
 function renderLoginHint() {
