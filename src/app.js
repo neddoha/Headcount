@@ -112,6 +112,7 @@ const viewState = {
 seedForms();
 bindEvents();
 render();
+activateView("baseline");
 startServerSync();
 
 async function initializeState() {
@@ -249,6 +250,9 @@ function mergeBaselineRows(existingRows) {
   let rows = Array.isArray(existingRows)
     ? existingRows.filter((row) => row.shiftName !== "Imported Baseline")
     : [];
+  if (shouldRestoreWorkbookBaseline(rows)) {
+    return structuredClone(DEMO_BASELINE_ROWS);
+  }
   rows = rows.map((row) =>
     ["guest experience", "engineering"].includes(normalizeName(row.subDepartment))
       ? {
@@ -288,6 +292,14 @@ function mergeBaselineRows(existingRows) {
     });
   });
   return rows;
+}
+
+function shouldRestoreWorkbookBaseline(rows) {
+  if (!rows.length) return true;
+  const hasAnyValue = rows.some((row) =>
+    [...DAYS, "weeklyTotal"].some((key) => Number(row?.[key] || 0) > 0),
+  );
+  return !hasAnyValue;
 }
 
 function mergeMappings(existingMappings) {
