@@ -93,6 +93,7 @@ let currentUser = await initializeSession();
 const state = await initializeState();
 let lastSyncedStateSignature = createStateSignature(state);
 let updateStream = null;
+let syncPauseUntil = 0;
 const viewState = {
   complianceWeek: "",
   baselineDepartment: "all",
@@ -343,6 +344,10 @@ async function saveState() {
   return await persistStateToApi();
 }
 
+function pauseServerSync(milliseconds = 8000) {
+  syncPauseUntil = Date.now() + milliseconds;
+}
+
 function startServerSync() {
   startLiveUpdates();
   window.addEventListener("focus", () => {
@@ -374,6 +379,7 @@ function startLiveUpdates() {
 }
 
 async function refreshStateFromServer() {
+  if (Date.now() < syncPauseUntil) return;
   const remoteState = await loadStateFromApi();
   if (!remoteState) return;
   const remoteSignature = createStateSignature(remoteState);
@@ -566,6 +572,7 @@ function bindEvents() {
       state.baselineRows.unshift(row);
     }
     event.currentTarget.reset();
+    pauseServerSync();
     saveState();
     render();
   });
@@ -705,12 +712,14 @@ function bindEvents() {
       const tableRow = button.closest("tr[data-row-id]");
       if (!tableRow) return;
       updateBaselineRowFromTable(tableRow);
+      pauseServerSync();
       await saveState();
       render();
       return;
     }
     if (button.dataset.action === "delete-baseline") {
       state.baselineRows = state.baselineRows.filter((row) => row.id !== rowId);
+      pauseServerSync();
       await saveState();
       render();
     }
