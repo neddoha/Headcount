@@ -1791,7 +1791,7 @@ function buildComplianceRows(baselineSummary, rosterRows, attendanceRows) {
 }
 
 function createRosterUpload(label, rawText, mappings, baselineRows, weekStart = getCurrentWeekStart()) {
-  const rows = parseStaffingText(rawText, mappings);
+  const rows = parseStaffingText(rawText, mappings, baselineRows);
   const normalizedWeekStart = normalizeWeekStart(weekStart);
   return {
     label,
@@ -1805,7 +1805,7 @@ function createRosterUpload(label, rawText, mappings, baselineRows, weekStart = 
 }
 
 function createAttendanceUpload(label, rawText, mappings, baselineRows, weekStart = getCurrentWeekStart()) {
-  const rows = parseStaffingText(rawText, mappings, { stripLeadingEmptyDay: true });
+  const rows = parseStaffingText(rawText, mappings, baselineRows, { stripLeadingEmptyDay: true });
   const normalizedWeekStart = normalizeWeekStart(weekStart);
   return {
     label,
@@ -1837,10 +1837,20 @@ function reprocessCurrentRosterWithMappings() {
   upsertUploadHistory("attendance", state.attendanceUpload);
 }
 
-function parseStaffingText(rawText, mappings, options = {}) {
+function parseStaffingText(rawText, mappings, baselineRows, options = {}) {
   const mappingMap = new Map(mappings.map((mapping) => [normalizeName(mapping.sourceName), mapping.targetName]));
+  const knownDepartments = new Set(
+    [
+      ...mappings.flatMap((mapping) => [mapping.sourceName, mapping.targetName]),
+      ...(baselineRows || []).map((row) => row.subDepartment),
+    ]
+      .filter(Boolean)
+      .map((name) => normalizeName(name)),
+  );
   Object.entries(FORCED_MAPPING_OVERRIDES).forEach(([sourceKey, targetName]) => {
     mappingMap.set(sourceKey, targetName);
+    knownDepartments.add(sourceKey);
+    knownDepartments.add(normalizeName(targetName));
   });
   return rawText
     .split(/\r?\n/)
@@ -1854,10 +1864,12 @@ function parseStaffingText(rawText, mappings, options = {}) {
       const normalizedCells = cells.map((cell) => cell?.trim() || "");
       const employeeId = normalizedCells[0] || "";
       const employeeName = normalizedCells[1] || "";
-      const { rosterDepartment, rawCodes } = extractDepartmentAndCodes(normalizedCells.slice(2));
+      const { rosterDepartment, rawCodes } = extractDepartmentAndCodes(normalizedCells.slice(2), knownDepartments);
+      const employeeIdLooksValid = /^\d{5,}$/.test(employeeId);
       const skipLine = !employeeId ||
         ["id", "employee id"].includes(normalizeName(employeeId)) ||
-        (!/\d/.test(employeeId) && (!employeeName || !rosterDepartment));
+        !employeeIdLooksValid ||
+        (!employeeName || !rosterDepartment);
       if (skipLine) return null;
       const codes = options.stripLeadingEmptyDay && rawCodes[0] === ""
         ? rawCodes.slice(1)
@@ -1876,36 +1888,43 @@ function parseStaffingText(rawText, mappings, options = {}) {
     .filter(Boolean);
 }
 
-function extractDepartmentAndCodes(cells) {
+function extractDepartmentAndCodes(cells, knownDepartments) {
   const normalized = cells.map((cell) => cell?.trim() || "");
   if (!normalized.length) {
     return { rosterDepartment: "", rawCodes: [] };
   }
 
-  const dayCodeStart = normalized.findIndex((cell, index) => {
-    if (cell === "") return false;
-    const remaining = normalized.slice(index);
-    const workingLike = remaining.filter((item) => item === "" || looksLikeAttendanceCode(item));
-    return workingLike.length >= Math.min(3, remaining.length);
-  });
-
-  if (dayCodeStart <= 0) {
+  const departmentIndex = normalized.findIndex((cell) => cell && knownDepartments.has(normalizeName(cell)));
+  if (departmentIndex >= 0) {
     return {
-      rosterDepartment: normalized[0] || "",
-      rawCodes: normalized.slice(1),
+      rosterDepartment: normalized[departmentIndex] || "",
+      rawCodes: normalized.slice(departmentIndex + 1),
     };
   }
 
-  const departmentCells = normalized.slice(0, dayCodeStart).filter(Boolean);
+  const fallbackIndex = normalized.findIndex((cell) => cell && !looksLikeDayValue(cell));
+  if (fallbackIndex >= 0) {
+    return {
+      rosterDepartment: normalized[fallbackIndex] || "",
+      rawCodes: normalized.slice(fallbackIndex + 1),
+    };
+  }
+
+  const departmentCells = normalized.filter(Boolean);
   return {
-    rosterDepartment: departmentCells[departmentCells.length - 1] || "",
-    rawCodes: normalized.slice(dayCodeStart),
+    rosterDepartment: departmentCells[0] || "",
+    rawCodes: normalized.slice(1),
   };
 }
 
-function looksLikeAttendanceCode(value) {
+function looksLikeDayValue(value) {
   const normalized = normalizeName(value).toUpperCase();
-  return /^[A-Z]{1,3}$/.test(normalized) || /^\d{1,2}$/.test(normalized);
+  return (
+    /^[A-Z]{1,3}$/.test(normalized) ||
+    /^\d{1,2}$/.test(normalized) ||
+    /^\d{3,4}$/.test(normalized) ||
+    /^0?\d{1,2}[AP]$/.test(normalized)
+  );
 }
 
 
