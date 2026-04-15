@@ -64,10 +64,7 @@ const elements = {
   blankDepartmentFilter: document.querySelector("#blank-department-filter"),
   blankSubDepartmentFilter: document.querySelector("#blank-subdepartment-filter"),
   blankRosterCheck: document.querySelector("#blank-roster-check"),
-  complianceRangeType: document.querySelector("#compliance-range-type"),
-  complianceStartDate: document.querySelector("#compliance-start-date"),
-  complianceEndDate: document.querySelector("#compliance-end-date"),
-  compliancePeriodLabel: document.querySelector("#compliance-period-label"),
+  complianceWeekFilter: document.querySelector("#compliance-week-filter"),
   complianceDepartmentFilter: document.querySelector("#compliance-department-filter"),
   complianceTable: document.querySelector("#compliance-table"),
   reportsTypeFilter: document.querySelector("#reports-type-filter"),
@@ -97,9 +94,7 @@ const state = await initializeState();
 let lastSyncedStateSignature = createStateSignature(state);
 let updateStream = null;
 const viewState = {
-  complianceRangeType: "7",
-  complianceStartDate: "",
-  complianceEndDate: "",
+  complianceWeek: "",
   baselineDepartment: "all",
   complianceDepartment: "all",
   reportsType: "classic",
@@ -445,46 +440,13 @@ function bindEvents() {
   elements.complianceDepartmentFilter.addEventListener("change", (event) => {
     viewState.complianceDepartment = event.target.value;
     const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
+    const complianceSummary = buildComplianceRowsForSelectedWeek(baselineSummary);
     renderComplianceTable(complianceSummary);
   });
 
-  elements.complianceRangeType.addEventListener("change", (event) => {
-    viewState.complianceRangeType = event.target.value;
-    syncComplianceDateRangeInputs();
+  elements.complianceWeekFilter.addEventListener("change", (event) => {
+    viewState.complianceWeek = event.target.value;
     const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
-    renderComplianceTable(complianceSummary);
-    renderReports(complianceSummary);
-    renderHeroStats(baselineSummary, complianceSummary);
-    renderSummaryCards(complianceSummary);
-    renderShortageTable(complianceSummary);
-    renderRecentUpload();
-  });
-
-  elements.complianceStartDate.addEventListener("change", (event) => {
-    viewState.complianceStartDate = normalizeDateInput(event.target.value);
-    if (viewState.complianceRangeType !== "custom") {
-      syncComplianceDateRangeInputs();
-    } else if (viewState.complianceEndDate < viewState.complianceStartDate) {
-      viewState.complianceEndDate = viewState.complianceStartDate;
-    }
-    const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
-    renderComplianceTable(complianceSummary);
-    renderReports(complianceSummary);
-    renderHeroStats(baselineSummary, complianceSummary);
-    renderSummaryCards(complianceSummary);
-    renderShortageTable(complianceSummary);
-    renderRecentUpload();
-  });
-
-  elements.complianceEndDate.addEventListener("change", (event) => {
-    viewState.complianceRangeType = "custom";
-    viewState.complianceEndDate = normalizeDateInput(event.target.value);
-    syncComplianceDateRangeInputs();
-    const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
     renderComplianceTable(complianceSummary);
     renderReports(complianceSummary);
     renderHeroStats(baselineSummary, complianceSummary);
@@ -496,14 +458,14 @@ function bindEvents() {
   elements.reportsDepartmentFilter.addEventListener("change", (event) => {
     viewState.reportsDepartment = event.target.value;
     const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
+    const complianceSummary = buildComplianceRowsForSelectedWeek(baselineSummary);
     renderReports(complianceSummary);
   });
 
   elements.reportsTypeFilter.addEventListener("change", (event) => {
     viewState.reportsType = event.target.value;
     const baselineSummary = aggregateBaseline(state.baselineRows);
-    const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
+    const complianceSummary = buildComplianceRowsForSelectedWeek(baselineSummary);
     renderReports(complianceSummary);
   });
 
@@ -562,7 +524,7 @@ function bindEvents() {
     state.attendanceUpload = createAttendanceUpload("Attendance Demo", DEMO_ATTENDANCE_TEXT, DEMO_MAPPINGS, state.baselineRows, defaultWeekStart);
     state.rosterHistory = [historySnapshot(state.rosterUpload)];
     state.attendanceHistory = [historySnapshot(state.attendanceUpload)];
-    setComplianceRangeFromWeek(defaultWeekStart);
+    viewState.complianceWeek = defaultWeekStart;
     seedForms();
     saveState();
     render();
@@ -697,7 +659,7 @@ function bindEvents() {
       form.get("weekStart"),
     );
     upsertUploadHistory("roster", state.rosterUpload);
-    setComplianceRangeFromWeek(state.rosterUpload.weekStart);
+    viewState.complianceWeek = state.rosterUpload.weekStart;
     saveState();
     render();
     activateView("compliance");
@@ -714,7 +676,7 @@ function bindEvents() {
       form.get("weekStart"),
     );
     upsertUploadHistory("attendance", state.attendanceUpload);
-    setComplianceRangeFromWeek(state.attendanceUpload.weekStart);
+    viewState.complianceWeek = state.attendanceUpload.weekStart;
     saveState();
     render();
     activateView("compliance");
@@ -805,9 +767,9 @@ function activateView(viewName) {
 
 function render() {
   const baselineSummary = aggregateBaseline(state.baselineRows);
-  initializeComplianceRange();
-  syncComplianceDateRangeInputs();
-  const complianceSummary = buildComplianceRowsForSelectedPeriod(baselineSummary);
+  initializeComplianceWeek();
+  renderWeekFilters();
+  const complianceSummary = buildComplianceRowsForSelectedWeek(baselineSummary);
   renderSessionState();
   renderLoginHint();
   renderDepartmentFilters();
@@ -825,16 +787,8 @@ function render() {
   renderAttendanceTable();
   renderAttendanceValidation();
   renderBlankRosterCheck();
-  renderCompliancePeriodLabel();
   renderComplianceTable(complianceSummary);
   renderReports(complianceSummary);
-}
-
-function renderCompliancePeriodLabel() {
-  if (!elements.compliancePeriodLabel) return;
-  elements.compliancePeriodLabel.innerHTML = `
-    <strong>Selected Period:</strong> ${escapeHtml(formatDateRangeLabel(viewState.complianceStartDate, viewState.complianceEndDate))}
-  `;
 }
 
 function renderLoginHint() {
@@ -899,6 +853,19 @@ function renderDepartmentFilters() {
   elements.blankSubDepartmentFilter.value = blankSubDepartments.includes(viewState.blankSubDepartment) ? viewState.blankSubDepartment : "all";
 }
 
+function renderWeekFilters() {
+  const weekOptions = getAvailableWeekOptions();
+  const options = weekOptions
+    .map((option) => `<option value="${option.value}">${escapeHtml(option.label)}</option>`)
+    .join("");
+  elements.complianceWeekFilter.innerHTML = options;
+  const allowedWeeks = weekOptions.map((option) => option.value);
+  if (!allowedWeeks.includes(viewState.complianceWeek)) {
+    viewState.complianceWeek = allowedWeeks[0] || getCurrentWeekStart();
+  }
+  elements.complianceWeekFilter.value = viewState.complianceWeek;
+}
+
 function renderSessionState() {
   const signedIn = Boolean(currentUser);
   document.body.classList.toggle("auth-locked", authState.authDisabled ? false : !signedIn);
@@ -944,7 +911,7 @@ function setAdminControlsEnabled(enabled) {
 function renderHeroStats(baselineSummary, complianceSummary) {
   const shortages = complianceSummary.filter((entry) => entry.weeklyVariance < 0).length;
   const mismatches = unmatchedRosterDepartments(state.rosterUpload.rows, state.baselineRows).length;
-  const activeWeekLabel = formatDateRangeLabel(viewState.complianceStartDate, viewState.complianceEndDate);
+  const activeWeekLabel = formatWeekLabel(viewState.complianceWeek);
   const tiles = [
     ["Total Work Areas", `Baseline areas tracked for ${activeWeekLabel}`, String(baselineSummary.length)],
     ["Departments Short", `Areas below required staffing in ${activeWeekLabel}`, String(shortages)],
@@ -981,17 +948,16 @@ function renderSummaryCards(complianceSummary) {
 }
 
 function renderRecentUpload() {
-  const selectedWeeks = getWeeksInSelectedRange();
-  const selectedRosterUpload = getUploadForWeek(state.rosterHistory, state.rosterUpload, selectedWeeks[0]);
-  const selectedAttendanceUpload = getUploadForWeek(state.attendanceHistory, state.attendanceUpload, selectedWeeks[0]);
-  const createdAt = selectedRosterUpload?.createdAt ? new Date(selectedRosterUpload.createdAt).toLocaleString() : "No roster upload in selected period";
-  const attendanceCreatedAt = selectedAttendanceUpload?.createdAt ? new Date(selectedAttendanceUpload.createdAt).toLocaleString() : "No attendance upload in selected period";
+  const selectedRosterUpload = getUploadForWeek(state.rosterHistory, state.rosterUpload, viewState.complianceWeek);
+  const selectedAttendanceUpload = getUploadForWeek(state.attendanceHistory, state.attendanceUpload, viewState.complianceWeek);
+  const createdAt = selectedRosterUpload?.createdAt ? new Date(selectedRosterUpload.createdAt).toLocaleString() : "No roster upload in selected week";
+  const attendanceCreatedAt = selectedAttendanceUpload?.createdAt ? new Date(selectedAttendanceUpload.createdAt).toLocaleString() : "No attendance upload in selected week";
   elements.recentUpload.innerHTML = `
-    <p><strong>Selected Period:</strong> ${escapeHtml(formatDateRangeLabel(viewState.complianceStartDate, viewState.complianceEndDate))}</p>
-    <p><strong>Roster:</strong> ${escapeHtml(selectedRosterUpload?.label || "No roster upload in selected period")}</p>
+    <p><strong>Week View:</strong> ${escapeHtml(formatWeekLabel(viewState.complianceWeek))}</p>
+    <p><strong>Roster:</strong> ${escapeHtml(selectedRosterUpload?.label || "No roster upload in selected week")}</p>
     <p>Uploaded: ${createdAt}</p>
     <p>Rows: ${selectedRosterUpload?.rows?.length || 0} | Issues: ${selectedRosterUpload?.issues?.length || 0}</p>
-    <p><strong>Attendance:</strong> ${escapeHtml(selectedAttendanceUpload?.label || "No attendance upload in selected period")}</p>
+    <p><strong>Attendance:</strong> ${escapeHtml(selectedAttendanceUpload?.label || "No attendance upload in selected week")}</p>
     <p>Uploaded: ${attendanceCreatedAt}</p>
     <p>Rows: ${selectedAttendanceUpload?.rows?.length || 0} | Issues: ${selectedAttendanceUpload?.issues?.length || 0}</p>
   `;
@@ -2120,13 +2086,10 @@ function syncComplianceDateRangeInputs() {
 function getSelectedDateRange() {
   const start = new Date(`${normalizeDateInput(viewState.complianceStartDate)}T00:00:00`);
   const end = new Date(`${normalizeDateInput(viewState.complianceEndDate)}T00:00:00`);
-  const availableWeeks = new Set(getAvailableWeekOptions().map((option) => option.value));
   const dates = [];
   for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
-    const dateKey = toDateInputValue(cursor);
-    if (!availableWeeks.has(normalizeWeekStart(dateKey))) continue;
     dates.push({
-      dateKey,
+      dateKey: toDateInputValue(cursor),
       dayKey: DAYS[cursor.getDay()],
     });
   }
@@ -2373,7 +2336,7 @@ function countsAsWorking(code) {
 }
 
 function emptyDayMap() {
-  return { sun: 0, mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0 };
+  return Object.fromEntries(DAYS.map((day) => [day, 0]));
 }
 
 function buildDepartmentLookup(rows) {
