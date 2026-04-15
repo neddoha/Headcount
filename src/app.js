@@ -80,7 +80,6 @@ const FORCED_MAPPING_OVERRIDES = {
   "f&b - nickel lounge": "F&B - Millies",
 };
 
-const AUTH_BYPASS_ENABLED = true;
 const OPEN_ACCESS_USER = {
   username: "open-access",
   name: "Open Access",
@@ -90,6 +89,7 @@ const OPEN_ACCESS_USER = {
 const authState = {
   environment: "development",
   usesDefaultCredentials: true,
+  authDisabled: false,
 };
 
 let currentUser = await initializeSession();
@@ -126,7 +126,6 @@ async function initializeState() {
 }
 
 async function initializeSession() {
-  if (AUTH_BYPASS_ENABLED) return OPEN_ACCESS_USER;
   try {
     const response = await fetch("/api/auth/session", {
       headers: { Accept: "application/json" },
@@ -136,6 +135,10 @@ async function initializeSession() {
     const payload = await response.json();
     authState.environment = payload?.auth?.environment || "development";
     authState.usesDefaultCredentials = payload?.auth?.usesDefaultCredentials ?? true;
+    authState.authDisabled = payload?.auth?.authDisabled ?? false;
+    if (authState.authDisabled) {
+      return payload?.user || OPEN_ACCESS_USER;
+    }
     return payload?.user || null;
   } catch {
     return null;
@@ -842,6 +845,12 @@ function renderLoginHint() {
     window.history.replaceState({}, "", cleanUrl);
   }
   if (!elements.loginHint) return;
+  if (authState.authDisabled) {
+    elements.loginHint.innerHTML = `
+      <p><strong>Open access mode:</strong> login is currently disabled for this environment.</p>
+    `;
+    return;
+  }
   if (authState.environment === "production" && !authState.usesDefaultCredentials) {
     elements.loginHint.innerHTML = `
       <p><strong>Live deployment:</strong> use the admin and user passwords configured in Render.</p>
@@ -892,10 +901,10 @@ function renderDepartmentFilters() {
 
 function renderSessionState() {
   const signedIn = Boolean(currentUser);
-  document.body.classList.toggle("auth-locked", AUTH_BYPASS_ENABLED ? false : !signedIn);
-  elements.loginOverlay.classList.toggle("active", AUTH_BYPASS_ENABLED ? false : !signedIn);
+  document.body.classList.toggle("auth-locked", authState.authDisabled ? false : !signedIn);
+  elements.loginOverlay.classList.toggle("active", authState.authDisabled ? false : !signedIn);
 
-  if (AUTH_BYPASS_ENABLED) {
+  if (authState.authDisabled) {
     elements.sessionSummary.innerHTML = "<p><strong>Open Access</strong></p><p>Login disabled for now</p>";
     elements.logoutBtn.classList.add("is-hidden");
     elements.headerLogoutBtn.classList.add("is-hidden");
