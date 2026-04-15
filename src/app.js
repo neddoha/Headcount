@@ -2197,6 +2197,10 @@ function buildComplianceRowsForSelectedPeriod(baselineSummary) {
   });
 }
 
+function buildComplianceRowsForSelectedWeek(baselineSummary) {
+  return buildComplianceRowsForSelectedPeriod(baselineSummary);
+}
+
 function normalizeWeekStart(value) {
   if (!value) return getCurrentWeekStart();
   const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
