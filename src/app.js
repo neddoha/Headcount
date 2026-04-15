@@ -458,7 +458,9 @@ function bindEvents() {
 
   elements.complianceWeekFilter.addEventListener("change", (event) => {
     viewState.complianceWeek = event.target.value;
+    setComplianceRangeFromWeek(viewState.complianceWeek);
     const baselineSummary = aggregateBaseline(state.baselineRows);
+    const complianceSummary = buildComplianceRowsForSelectedWeek(baselineSummary);
     renderComplianceTable(complianceSummary);
     renderReports(complianceSummary);
     renderHeroStats(baselineSummary, complianceSummary);
@@ -2030,6 +2032,14 @@ function getAvailableWeekOptions() {
   return [...weeks]
     .sort((left, right) => String(right).localeCompare(String(left)))
     .map((weekStart) => ({ value: weekStart, label: formatWeekLabel(weekStart) }));
+}
+
+function initializeComplianceWeek() {
+  const latest = getAvailableWeekOptions()[0];
+  if (!viewState.complianceWeek) {
+    viewState.complianceWeek = latest?.value || getCurrentWeekStart();
+  }
+  setComplianceRangeFromWeek(viewState.complianceWeek);
 }
 
 function initializeComplianceRange() {
