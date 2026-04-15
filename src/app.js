@@ -1851,7 +1851,10 @@ function parseStaffingText(rawText, mappings, options = {}) {
     .filter((entry) => entry.line)
     .map(({ line, sourceRowNumber }) => {
       const cells = line.split("\t");
-      const [employeeId, employeeName, rosterDepartment, ...rawCodes] = cells.map((cell) => cell?.trim() || "");
+      const normalizedCells = cells.map((cell) => cell?.trim() || "");
+      const employeeId = normalizedCells[0] || "";
+      const employeeName = normalizedCells[1] || "";
+      const { rosterDepartment, rawCodes } = extractDepartmentAndCodes(normalizedCells.slice(2));
       const skipLine = !employeeId ||
         ["id", "employee id"].includes(normalizeName(employeeId)) ||
         (!/\d/.test(employeeId) && (!employeeName || !rosterDepartment));
@@ -1871,6 +1874,38 @@ function parseStaffingText(rawText, mappings, options = {}) {
       };
     })
     .filter(Boolean);
+}
+
+function extractDepartmentAndCodes(cells) {
+  const normalized = cells.map((cell) => cell?.trim() || "");
+  if (!normalized.length) {
+    return { rosterDepartment: "", rawCodes: [] };
+  }
+
+  const dayCodeStart = normalized.findIndex((cell, index) => {
+    if (cell === "") return false;
+    const remaining = normalized.slice(index);
+    const workingLike = remaining.filter((item) => item === "" || looksLikeAttendanceCode(item));
+    return workingLike.length >= Math.min(3, remaining.length);
+  });
+
+  if (dayCodeStart <= 0) {
+    return {
+      rosterDepartment: normalized[0] || "",
+      rawCodes: normalized.slice(1),
+    };
+  }
+
+  const departmentCells = normalized.slice(0, dayCodeStart).filter(Boolean);
+  return {
+    rosterDepartment: departmentCells[departmentCells.length - 1] || "",
+    rawCodes: normalized.slice(dayCodeStart),
+  };
+}
+
+function looksLikeAttendanceCode(value) {
+  const normalized = normalizeName(value).toUpperCase();
+  return /^[A-Z]{1,3}$/.test(normalized) || /^\d{1,2}$/.test(normalized);
 }
 
 
