@@ -669,7 +669,7 @@ function bindEvents() {
     render();
   });
 
-  elements.rosterForm.addEventListener("submit", (event) => {
+  elements.rosterForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     state.rosterUpload = createRosterUpload(
@@ -681,12 +681,13 @@ function bindEvents() {
     );
     upsertUploadHistory("roster", state.rosterUpload);
     viewState.complianceWeek = state.rosterUpload.weekStart;
-    saveState();
+    pauseServerSync();
+    await saveState();
     render();
     activateView("compliance");
   });
 
-  elements.attendanceForm.addEventListener("submit", (event) => {
+  elements.attendanceForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     state.attendanceUpload = createAttendanceUpload(
@@ -698,7 +699,8 @@ function bindEvents() {
     );
     upsertUploadHistory("attendance", state.attendanceUpload);
     viewState.complianceWeek = state.attendanceUpload.weekStart;
-    saveState();
+    pauseServerSync();
+    await saveState();
     render();
     activateView("compliance");
   });
