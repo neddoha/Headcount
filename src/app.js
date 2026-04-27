@@ -2422,7 +2422,7 @@ function computeNetWorkingDays(settings) {
 
 function countsAsWorking(code) {
   const normalizedCode = (code || "").trim().toUpperCase();
-  if (["OW", "PW", "R"].includes(normalizedCode)) return true;
+  if (["PW", "R"].includes(normalizedCode)) return true;
   return !DEFAULT_NON_WORKING_CODES.includes(normalizedCode);
 }
 
